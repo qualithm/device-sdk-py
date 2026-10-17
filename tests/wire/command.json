@@ -1,0 +1,12 @@
+{
+  "source": "device-sdk-js src/__tests__/unit/capability.test.ts (decodeCommandPayload, isValidCapabilityKey)",
+  "decoded": [
+    { "payload": "{}", "trigger": true },
+    { "payload": "{\"value\":true}", "trigger": false, "value": true },
+    { "payload": "{\"value\":0.5}", "trigger": false, "value": 0.5 },
+    { "payload": "{\"value\":\"high\"}", "trigger": false, "value": "high" }
+  ],
+  "rejected": ["not json", "[1]", "\"x\"", "1", "{\"v\":1}", "{\"value\":1,\"x\":2}"],
+  "validKeys": ["power", "power-1", "fan_speed", "A1"],
+  "invalidKeys": ["bad key", "bad/key", "", "-lead", "_lead", "k0123456789012345678901234567890123456789012345678901234567890123"]
+}

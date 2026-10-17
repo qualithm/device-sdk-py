@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# Vendored by dx/scripts/audit-sync from dx's .github/actions/report-scan-failure/run.sh. Do not edit directly — change the source in dx and re-run audit-sync.
+# Implementation for the report-scan-failure composite action. See action.yaml for inputs.
+set -euo pipefail
+
+: "${MODE:?}" "${TITLE:?}"
+
+# Issues file on the org's private tracker (Decision pm#2); SOURCE_REPO records where
+# the failing scan ran. Titles carry the repo name, so dedup is unaffected by the move.
+REPO="qualithm/pm"
+SOURCE_REPO="${SOURCE_REPO:?}"
+
+# Labels to apply and dedup under; accept space- or comma-separated input.
+LABELS="${LABELS:-security-audit}"
+LABELS="${LABELS//,/ }"
+
+existing="$(gh issue list --repo "$REPO" --state open --search "\"${TITLE}\"" \
+  --json number,title --jq "[.[] | select(.title == \"${TITLE}\")][0].number // empty")"
+
+case "$MODE" in
+report)
+  # Ensure every requested label exists before `gh issue create --label` can
+  # attach it. `security-audit` and `off-board` are the off-the-Engineering-board
+  # markers (issue-templates/add-to-project.yaml excludes both) and keep their
+  # canonical styling; see Decision qualithm/pm#705:
+  # https://github.com/qualithm/pm/discussions/705. Any other label is created
+  # if missing with a neutral colour. --force makes the marker creates idempotent.
+  for l in $LABELS; do
+    case "$l" in
+    security-audit)
+      gh label create security-audit --repo "$REPO" --color "b60205" --force \
+        --description "Automated scan failure filed by report-scan-failure; kept off the Engineering board (Decision pm#2)" \
+        >/dev/null
+      ;;
+    off-board)
+      gh label create off-board --repo "$REPO" --color "5319e7" --force \
+        --description "Automation-filed issue kept off the Engineering board (Decision pm#2)" \
+        >/dev/null
+      ;;
+    *)
+      gh label create "$l" --repo "$REPO" --color "ededed" >/dev/null 2>&1 || true
+      ;;
+    esac
+  done
+
+  label_args=()
+  for l in $LABELS; do label_args+=(-f "labels[]=$l"); done
+
+  if [[ -n "$existing" ]]; then
+    if [[ -n "${BODY:-}" ]]; then
+      # A caller that supplies a body owns the issue's contents: refresh them in place so a
+      # report whose value lives in the body (a table of findings) can't go stale, and stay
+      # silent when nothing changed so a recurring finding doesn't accrue a comment per run.
+      current="$(gh issue view "$existing" --repo "$REPO" --json body --jq .body)"
+      if [[ "$(printf '%s' "$current" | tr -d '\r')" == "$(printf '%s' "$BODY" | tr -d '\r')" ]]; then
+        echo "report-scan-failure: issue #${existing} already up to date"
+      else
+        gh issue edit "$existing" --repo "$REPO" --body "$BODY" >/dev/null
+        echo "report-scan-failure: refreshed body of issue #${existing}"
+      fi
+    else
+      gh issue comment "$existing" --repo "$REPO" --body "Still failing as of ${RUN_URL}."
+      echo "report-scan-failure: bumped existing issue #${existing}"
+    fi
+  else
+    body="${BODY:-}"
+    if [[ -z "$body" ]]; then
+      body="### Why
+The scheduled scan is failing, which means it found something real rather than a one-off flake
+— someone needs to look at the failing run and fix the underlying problem.
+
+### Scope / contract
+Investigate the failing run linked below, determine the root cause, and resolve it (dependency
+bump, code fix, or a documented, justified suppression). Do not silence the check without
+addressing the finding.
+
+### Acceptance
+- [ ] Root cause identified
+- [ ] Fix applied
+- [ ] The workflow passes again on ${SOURCE_REPO}
+
+### Links
+- Source repo: https://github.com/${SOURCE_REPO}
+- Failing run: ${RUN_URL}"
+    fi
+    # REST rather than `gh issue create`: newer gh resolves repository.defaultBranchRef over
+    # GraphQL first, which needs contents:read — a permission the issue-filing app token
+    # doesn't hold — so every new issue failed with "Resource not accessible by integration".
+    # POST /repos/{owner}/{repo}/issues needs issues:write alone.
+    url="$(gh api "repos/${REPO}/issues" -f "title=$TITLE" -f "body=$body" "${label_args[@]}" --jq .html_url)"
+    echo "report-scan-failure: filed ${url}"
+  fi
+  ;;
+resolve)
+  if [[ -n "$existing" ]]; then
+    assignees="$(gh issue view "$existing" --repo "$REPO" --json assignees --jq '.assignees | length')"
+    if [[ "$assignees" -eq 0 ]]; then
+      gh issue comment "$existing" --repo "$REPO" \
+        --body "Resolved automatically — the workflow passed again with nobody assigned."
+      gh issue close "$existing" --repo "$REPO"
+      echo "report-scan-failure: auto-closed issue #${existing}"
+    else
+      echo "report-scan-failure: issue #${existing} is claimed; leaving it for whoever is fixing it"
+    fi
+  else
+    echo "report-scan-failure: no open issue to resolve"
+  fi
+  ;;
+*)
+  echo "report-scan-failure: unknown mode: ${MODE}" >&2
+  exit 1
+  ;;
+esac

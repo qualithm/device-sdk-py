@@ -1,0 +1,83 @@
+[project]
+name = "qualithm-device"
+# 0.0.0 marks the package unreleased; package.json carries the same version.
+version = "0.0.0"
+description = "Device SDK for MicroPython and Python devices connecting to Qualithm."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "coverage>=7.16.2",
+  # Built for the MicroPython version CI pins; Type Check fails when they differ.
+  "micropython-rp2-rpi_pico2_w-stubs==1.29.0.post1",
+  "pyright>=1.1.414",
+  "pytest>=9.1.1",
+  "ruff>=0.16.10",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# Files dx syncs in follow dx's style, not this repo's.
+extend-exclude = [".claude"]
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle errors
+  "W",   # pycodestyle warnings
+  "F",   # pyflakes
+  "I",   # isort
+  "N",   # pep8-naming
+  "B",   # bugbear
+  "S",   # bandit
+  "A",   # builtins
+  "C4",  # comprehensions
+  "D",   # pydocstyle
+  "RET", # returns
+  "SIM", # simplify
+  "TID", # tidy imports
+  "ANN", # annotations
+  "PL",  # pylint
+  "RUF", # ruff
+]
+# The core runs on MicroPython: it keeps string annotations and `%` formatting, which the
+# pyupgrade rules would rewrite into forms a board can't run.
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# Tests run under MicroPython's unittest too: TestCase methods and untyped fakes.
+"tests/**" = ["D", "ANN", "PLR2004", "PLR0913", "SLF001", "S101", "S105", "S106"]
+"tests_cpython/**" = ["D", "ANN"]
+"examples/**" = ["T20"]
+
+[tool.pyright]
+include = ["src", "tests", "examples"]
+strict = ["src"]
+pythonVersion = "3.11"
+extraPaths = ["tests/fakes"]
+# Board modules are stubs with no source on the host.
+reportMissingModuleSource = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "tests_cpython"]
+pythonpath = ["tests/fakes"]
+addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importlib"]
+xfail_strict = true
+
+[tool.coverage.run]
+source_pkgs = ["qualithm_device"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_also = ["if TYPE_CHECKING:"]
