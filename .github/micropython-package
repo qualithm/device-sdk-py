@@ -216,7 +216,9 @@ def command_subset(root, _args):
             raise PackageError(f"{SOURCE}/{module}: {err}") from None
         for name, line in imports(tree):
             top = name.split(".")[0]
-            if name in allowed or top in own or top in deps:
+            # A dep is a mip package named by its import path, dotted for a
+            # submodule of a namespace (umqtt.simple), which installs only it.
+            if name in allowed or top in own or any(name == dep or name.startswith(dep + ".") for dep in deps):
                 continue
             problems.append(f"{SOURCE}/{module}:{line}: imports {name}, which a board doesn't have")
     if problems:

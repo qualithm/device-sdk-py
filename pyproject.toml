@@ -64,9 +64,13 @@ convention = "google"
 include = ["src", "tests", "examples"]
 strict = ["src"]
 pythonVersion = "3.11"
-extraPaths = ["tests/fakes"]
 # Board modules are stubs with no source on the host.
 reportMissingModuleSource = false
+# src/ checks against the board stubs and stubs/ (what they lack); only the tests see the fakes.
+executionEnvironments = [
+  { root = "src", extraPaths = ["stubs"] },
+  { root = "tests", extraPaths = ["tests/fakes"] },
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "tests_cpython"]
