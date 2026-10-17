@@ -17,6 +17,8 @@ the device once, stores its credential, renews it before it expires, and opens i
   checked before they go on the wire.
 - **Board-agnostic.** The core runs on MicroPython and CPython. It reaches the network, crypto and
   storage only through three small adapters the board supplies.
+- **Pico 2 W adapters included.** `qualithm_device.pico` joins Wi-Fi, verifies every TLS
+  certificate, and stores the credential in flash.
 
 ## Installation
 
@@ -36,6 +38,9 @@ uv add "qualithm-device @ git+https://github.com/qualithm/device-sdk-py"
 
 ## Run it on a Pico 2 W
 
+You need a Pico 2 W, a USB cable, a 2.4 GHz Wi-Fi network, and a claim code: the single-use code
+the platform gives you when you add a device.
+
 1. Flash MicroPython 1.29.0: hold BOOTSEL while plugging the board in, then copy the Pico 2 W `.uf2`
    from [micropython.org/download/RPI_PICO2_W](https://micropython.org/download/RPI_PICO2_W/) onto
    the `RP2350` drive that appears.
@@ -46,9 +51,40 @@ uv add "qualithm-device @ git+https://github.com/qualithm/device-sdk-py"
    uvx mpremote exec "import mip; mip.install('github:qualithm/device-sdk-py@<version>')"
    ```
 
-3. Supply the board's adapters and call `connect()`, as in [Quick Start](#quick-start). The Pico 2 W
-   adapters aren't released yet; until they are, write the three adapters yourself (see
-   [Usage](#usage)).
+3. Save this as `main.py`, with your network and claim code filled in:
+
+   ```python
+   import time
+
+   from qualithm_device import connect, pico
+
+   wlan = pico.join_wifi("<your-ssid>", "<your-password>")
+   device = connect(
+       "https://api.qualithm.com",
+       transport=pico.Transport(),
+       store=pico.FlashStore(),
+       claim_code="<your-claim-code>",
+   )
+   while True:
+       device.publish_reading(pico.system_info(wlan))
+       device.poll()
+       device.renew_if_due()
+       time.sleep(60)
+   ```
+
+4. Copy it to the board and reset it:
+
+   ```bash
+   uvx mpremote cp main.py :main.py + reset
+   ```
+
+The board claims itself on first boot and stores its credential in flash. Every minute it sends its
+uptime, free memory, chip temperature, Wi-Fi signal strength and firmware version. On a later boot
+it reuses the stored credential, so the claim code is no longer needed.
+
+`join_wifi` sets the clock from NTP, since the board checks each server's certificate and its
+dates. A Pico connects with a token credential: it has no on-board key generation for a
+certificate.
 
 ## Quick Start
 
@@ -78,6 +114,9 @@ The core holds the protocol; the board supplies three adapters, typed in
 | `transport` | `request(method, url, headers, body)` and `open(...)`           |
 | `crypto`    | `generate_csr(device_id)` and `sign(private_key_pem, message)`  |
 | `store`     | `load()`, `save(credential)` and `clear()`                      |
+
+`qualithm_device.pico` holds the Pico 2 W and Pico W adapters: `Transport`, `FlashStore`, and
+`join_wifi` and `system_info`.
 
 `transport.open` returns a session with `publish`, `subscribe`, `poll`, `close` and
 `max_packet_size`. `crypto` is needed only for a certificate credential.
