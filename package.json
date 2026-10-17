@@ -26,6 +26,10 @@
       "https://github.com/qualithm/device-sdk-py/releases/download/0.0.0/qualithm_device._provision.mpy"
     ],
     [
+      "qualithm_device/_roots.mpy",
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.0.0/qualithm_device._roots.mpy"
+    ],
+    [
       "qualithm_device/_subject.mpy",
       "https://github.com/qualithm/device-sdk-py/releases/download/0.0.0/qualithm_device._subject.mpy"
     ],
@@ -36,8 +40,17 @@
     [
       "qualithm_device/interfaces.mpy",
       "https://github.com/qualithm/device-sdk-py/releases/download/0.0.0/qualithm_device.interfaces.mpy"
+    ],
+    [
+      "qualithm_device/pico.mpy",
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.0.0/qualithm_device.pico.mpy"
     ]
   ],
-  "deps": [],
+  "deps": [
+    [
+      "umqtt.simple",
+      "1.8.0"
+    ]
+  ],
   "description": "Device SDK for MicroPython and Python devices connecting to Qualithm."
 }
