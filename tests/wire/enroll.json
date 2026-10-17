@@ -1,0 +1,37 @@
+{
+  "source": "device-sdk-js src/__tests__/unit/enroll.test.ts; platform src/management/post-provision-cert.ts",
+  "claimed": {
+    "deviceId": "d",
+    "teamId": "t",
+    "spaceId": "s",
+    "kind": "token",
+    "token": "qmd_abc",
+    "issuedAt": "2026-01-01T00:00:00.000Z",
+    "broker": { "host": "gw.test-sg-sin-a.qualithm.com", "port": 8883 }
+  },
+  "authorization": "Basic ZDpxbWRfYWJj",
+  "cases": [
+    {
+      "description": "the broker comes from the enrollment response",
+      "status": 201,
+      "body": {
+        "data": {
+          "certificatePem": "cert-pem",
+          "caCertificatePem": "ca-pem",
+          "broker": { "host": "gw.sg-sin-a.qualithm.com", "port": 8883 }
+        }
+      },
+      "broker": { "host": "gw.sg-sin-a.qualithm.com", "port": 8883 }
+    },
+    {
+      "description": "the claimed broker stays when the response has none",
+      "status": 201,
+      "body": { "data": { "certificatePem": "cert-pem", "caCertificatePem": "ca-pem" } },
+      "broker": { "host": "gw.test-sg-sin-a.qualithm.com", "port": 8883 }
+    }
+  ],
+  "errors": [
+    { "description": "a rejected CSR", "status": 400, "body": { "message": "bad csr" }, "message": "bad csr" },
+    { "description": "a body that isn't JSON", "status": 500, "raw": "not json", "message": "enrollment failed with status 500" }
+  ]
+}

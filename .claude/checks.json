@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "commands": [
+    {
+      "run": "uv run --locked ruff check",
+      "timeout": "10m",
+      "dir": "."
+    },
+    {
+      "run": "uv run --locked ruff format --check",
+      "timeout": "10m",
+      "dir": "."
+    },
+    {
+      "run": "uv run --no-project --with pyyaml env -u VIRTUAL_ENV python .claude/checks/ci-jobs.py --skip-ci-only lint typecheck coverage micropython",
+      "timeout": "30m",
+      "dir": "."
+    }
+  ]
+}

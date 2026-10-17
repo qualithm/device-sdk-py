@@ -1,0 +1,321 @@
+#!/usr/bin/env python3
+# Vendored by dx ci sync from dx's ci-templates/_micropython-package.py. Do not edit — change the source in dx and re-run dx ci sync.
+"""Build and check a MicroPython package's mip release (Decisions qualithm/pm#2254, #2255).
+
+package.json is mip's manifest and the version source. Its `urls` name each
+module under src/ as a .mpy, fetched from the release asset of its version, so
+`mip.install("github:<owner>/<repo>@<version>")` installs precompiled files.
+
+Usage:
+  micropython-package manifest [--check] [--base-url URL]
+      Write package.json's urls from src/ and its version, keeping every other
+      key; --check fails instead when the committed file differs. The base URL
+      defaults to the repo's release download URL for the version.
+  micropython-package compile OUT --mpy-cross PATH
+      Compile each module the manifest ships into OUT under its asset name, and
+      copy package.json beside them: the release's assets.
+  micropython-package subset
+      Fail on an import in a shipped module that a board can't satisfy. Runs
+      in the environment holding the board stubs (`uv run`).
+  micropython-package toolchain --micropython PATH --mpy-cross PATH
+      Fail unless both tools report MICROPYTHON_VERSION and the same .mpy
+      version, so nothing ships .mpy files a board rejects.
+  micropython-package stubs
+      Fail unless every installed MicroPython stubs package is built for
+      MICROPYTHON_VERSION.
+
+package.json may carry `exclude`, src-relative globs of host-only modules the
+manifest leaves out (a dual-runtime package's CPython adapters), and mip's own
+`deps`. Exits 1 with the reason on stderr.
+"""
+
+import argparse
+import ast
+import fnmatch
+import importlib.metadata
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+MANIFEST = "package.json"
+SOURCE = "src"
+STDLIB_STUBS = "micropython-stdlib-stubs"
+STUBS = re.compile(r"^micropython-.+-stubs$")
+# MicroPython's built-in core, which the stdlib stubs describe beside modules
+# that exist only for type checking (typing, abc, enum, __future__).
+CORE = {"array", "asyncio", "builtins", "collections", "io", "json", "os", "re", "ssl", "struct", "sys"}
+FIX = "python3 .github/micropython-package manifest"
+
+
+class PackageError(Exception):
+    """A check failed; the message says what to change."""
+
+
+def load_manifest(root):
+    path = root / MANIFEST
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise PackageError(f"no {MANIFEST}: a MicroPython package's mip manifest is its version source") from None
+    except json.JSONDecodeError as err:
+        raise PackageError(f"{MANIFEST}: {err}") from None
+    version = manifest.get("version") if isinstance(manifest, dict) else None
+    if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?", version):
+        raise PackageError(f"{MANIFEST}: version must be a semver string, e.g. 0.1.0")
+    return manifest
+
+
+def shipped(root, manifest):
+    """The modules the manifest ships, as src-relative POSIX paths, sorted."""
+    exclude = manifest.get("exclude", [])
+    if not isinstance(exclude, list) or not all(isinstance(glob, str) for glob in exclude):
+        raise PackageError(f"{MANIFEST}: exclude must be a list of src-relative globs")
+    source = root / SOURCE
+    if not source.is_dir():
+        raise PackageError(f"no {SOURCE}/: the package's modules live under it")
+    modules = sorted(
+        path.relative_to(source).as_posix()
+        for path in source.rglob("*.py")
+        if "__pycache__" not in path.parts
+    )
+    kept = [module for module in modules if not any(fnmatch.fnmatch(module, glob) for glob in exclude)]
+    if not kept:
+        raise PackageError(f"{SOURCE}/ has no module to ship")
+    return kept
+
+
+def asset_name(module):
+    """The release asset for a module: its path with / as . (asset names are flat)."""
+    return module[: -len(".py")].replace("/", ".") + ".mpy"
+
+
+def repository(root):
+    """owner/name, from GITHUB_REPOSITORY in CI or the origin remote."""
+    slug = os.environ.get("GITHUB_REPOSITORY", "")
+    if not slug:
+        result = subprocess.run(
+            ["git", "-C", str(root), "remote", "get-url", "origin"], capture_output=True, text=True, check=False
+        )
+        match = re.search(r"github\.com[:/]([^/]+/[^/]+?)(\.git)?$", result.stdout.strip())
+        slug = match.group(1) if match else ""
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", slug):
+        raise PackageError("can't tell the GitHub repository: set GITHUB_REPOSITORY or an origin remote")
+    return slug
+
+
+def render(root, manifest, base_url):
+    """The manifest with its urls rebuilt, as the text the file should hold."""
+    if base_url is None:
+        base_url = f"https://github.com/{repository(root)}/releases/download/{manifest['version']}"
+    urls = [[module[: -len(".py")] + ".mpy", f"{base_url.rstrip('/')}/{asset_name(module)}"] for module in shipped(root, manifest)]
+    rendered = {"version": manifest["version"], "urls": urls}
+    rendered.update((key, value) for key, value in manifest.items() if key not in rendered)
+    return json.dumps(rendered, indent=2) + "\n"
+
+
+def command_manifest(root, args):
+    manifest = load_manifest(root)
+    text = render(root, manifest, args.base_url)
+    path = root / MANIFEST
+    if args.check:
+        if path.read_text(encoding="utf-8") != text:
+            raise PackageError(f"{MANIFEST} doesn't list src/ at version {manifest['version']}: run `{FIX}` and commit it")
+        print(f"{MANIFEST} ships {len(json.loads(text)['urls'])} modules at {manifest['version']}")
+        return
+    path.write_text(text, encoding="utf-8")
+    print(f"wrote {MANIFEST}")
+
+
+def command_compile(root, args):
+    manifest = load_manifest(root)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    for module in shipped(root, manifest):
+        # -s names the module in tracebacks as the board sees it, not by src/.
+        result = subprocess.run(
+            [args.mpy_cross, "-o", str(out / asset_name(module)), "-s", module, str(root / SOURCE / module)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise PackageError(f"mpy-cross can't compile {SOURCE}/{module}:\n{result.stderr.strip()}")
+        print(f"compiled {SOURCE}/{module} -> {asset_name(module)}")
+    (out / MANIFEST).write_text((root / MANIFEST).read_text(encoding="utf-8"), encoding="utf-8")
+
+
+def stub_distributions():
+    return [dist for dist in importlib.metadata.distributions() if STUBS.match(dist.metadata["Name"] or "")]
+
+
+def board_modules():
+    """Dotted module names the installed board stubs declare."""
+    boards = [dist for dist in stub_distributions() if dist.metadata["Name"] != STDLIB_STUBS]
+    if not boards:
+        raise PackageError("no MicroPython board stubs installed: add micropython-<port>-<board>-stubs to the dev group")
+    names = set()
+    for dist in boards:
+        for file in dist.files or []:
+            parts = Path(str(file)).parts
+            if not parts or parts[0].endswith(".dist-info") or parts[-1].split(".")[-1] not in ("py", "pyi"):
+                continue
+            dotted = list(parts[:-1]) + [parts[-1].rsplit(".", 1)[0]]
+            if dotted[-1] == "__init__":
+                dotted.pop()
+            if dotted:
+                names.add(".".join(dotted))
+    return names
+
+
+def type_checking_only(node, parents):
+    """Whether the import sits under `if TYPE_CHECKING:`, which never runs on a board."""
+    child = node
+    for parent in reversed(parents):
+        if isinstance(parent, ast.If) and child in parent.body:
+            test = parent.test
+            if (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING") or (
+                isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+            ):
+                return True
+        child = parent
+    return False
+
+
+def imports(tree):
+    """Each import's absolute module and line, outside TYPE_CHECKING blocks."""
+    found = []
+
+    def walk(node, parents):
+        if isinstance(node, (ast.Import, ast.ImportFrom)) and not type_checking_only(node, parents):
+            if isinstance(node, ast.Import):
+                found.extend((alias.name, node.lineno) for alias in node.names)
+            elif node.level == 0 and node.module:
+                found.append((node.module, node.lineno))
+        for child in ast.iter_child_nodes(node):
+            walk(child, [*parents, node])
+
+    walk(tree, [])
+    return found
+
+
+def command_subset(root, _args):
+    manifest = load_manifest(root)
+    modules = shipped(root, manifest)
+    own = {module.split("/")[0].removesuffix(".py") for module in modules}
+    deps = {dep[0] for dep in manifest.get("deps", []) if isinstance(dep, list) and dep and isinstance(dep[0], str)}
+    allowed = board_modules() | CORE
+    problems = []
+    for module in modules:
+        path = root / SOURCE / module
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except SyntaxError as err:
+            raise PackageError(f"{SOURCE}/{module}: {err}") from None
+        for name, line in imports(tree):
+            top = name.split(".")[0]
+            if name in allowed or top in own or top in deps:
+                continue
+            problems.append(f"{SOURCE}/{module}:{line}: imports {name}, which a board doesn't have")
+    if problems:
+        raise PackageError(
+            "\n".join(problems)
+            + f"\nthe modules {MANIFEST} ships run on MicroPython: import only what the board stubs declare,"
+            + " move host-only code to a module the manifest's exclude leaves out, or guard a type-only"
+            + " import with `if TYPE_CHECKING:` (TYPE_CHECKING = False, since a board has no typing)"
+        )
+    print(f"{len(modules)} shipped modules import only what a board has")
+
+
+def pinned_version():
+    version = os.environ.get("MICROPYTHON_VERSION", "")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise PackageError("MICROPYTHON_VERSION isn't set to X.Y.Z: run this from the CI job that pins it")
+    return version
+
+
+def run_tool(command):
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+    except OSError as err:
+        raise PackageError(f"can't run {command[0]}: {err}") from None
+    if result.returncode != 0:
+        raise PackageError(f"{command[0]} failed: {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
+def command_toolchain(_root, args):
+    want = pinned_version()
+    report = run_tool(
+        [
+            args.micropython,
+            "-c",
+            "import sys; v = sys.implementation; print('%d.%d.%d %d.%d' % (v.version[0], v.version[1], v.version[2], v._mpy & 0xff, v._mpy >> 8 & 3))",
+        ]
+    )
+    interpreter, interpreter_mpy = report.split()
+    match = re.search(r"MicroPython v(\d+\.\d+\.\d+)\S* .*emitting mpy v(\d+\.\d+)", run_tool([args.mpy_cross, "--version"]))
+    if match is None:
+        raise PackageError(f"can't read {args.mpy_cross}'s version")
+    compiler, compiler_mpy = match.groups()
+    if interpreter != want or compiler != want:
+        raise PackageError(
+            f"the toolchain pins MicroPython {want}, but the Unix port is {interpreter} and mpy-cross is {compiler}:"
+            + " rebuild both from the pinned tag"
+        )
+    if interpreter_mpy != compiler_mpy:
+        raise PackageError(f"mpy-cross emits mpy v{compiler_mpy}, but MicroPython {want} loads v{interpreter_mpy}")
+    print(f"MicroPython {want}: Unix port and mpy-cross agree on mpy v{compiler_mpy}")
+
+
+def command_stubs(_root, _args):
+    want = pinned_version()
+    dists = stub_distributions()
+    if not dists:
+        raise PackageError("no MicroPython stubs installed: add micropython-<port>-<board>-stubs to the dev group")
+    off = [
+        f"{dist.metadata['Name']} {dist.version}"
+        for dist in dists
+        if not re.fullmatch(rf"{re.escape(want)}(\.post\d+)?", dist.version)
+    ]
+    if off:
+        raise PackageError(
+            f"the stubs aren't built for MicroPython {want}: {', '.join(off)}; pin them to {want} in pyproject.toml and run `uv lock`"
+        )
+    print(f"MicroPython stubs match {want}")
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="micropython-package", description="build and check a MicroPython package's mip release")
+    commands = parser.add_subparsers(dest="command", required=True)
+    manifest = commands.add_parser("manifest")
+    manifest.add_argument("--check", action="store_true")
+    manifest.add_argument("--base-url")
+    compile_ = commands.add_parser("compile")
+    compile_.add_argument("out")
+    compile_.add_argument("--mpy-cross", required=True)
+    commands.add_parser("subset")
+    toolchain = commands.add_parser("toolchain")
+    toolchain.add_argument("--micropython", required=True)
+    toolchain.add_argument("--mpy-cross", required=True)
+    commands.add_parser("stubs")
+    args = parser.parse_args(argv)
+    handlers = {
+        "manifest": command_manifest,
+        "compile": command_compile,
+        "subset": command_subset,
+        "toolchain": command_toolchain,
+        "stubs": command_stubs,
+    }
+    try:
+        handlers[args.command](Path.cwd(), args)
+    except PackageError as err:
+        print(f"micropython-package: {err}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
