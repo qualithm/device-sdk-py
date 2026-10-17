@@ -1,0 +1,22 @@
+.DS_Store
+.env*
+
+# uv
+.venv/
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Coverage
+.coverage
+.coverage.*
+coverage/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+
+# IDE
+.idea/
