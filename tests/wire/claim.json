@@ -1,0 +1,61 @@
+{
+  "source": "device-sdk-js src/__tests__/unit/claim.test.ts; platform src/management/post-claim.ts",
+  "request": { "code": "qmc_x.y" },
+  "cases": [
+    {
+      "description": "a successful claim maps into a token credential",
+      "status": 200,
+      "body": {
+        "success": true,
+        "data": { "deviceId": "d", "spaceId": "s", "teamId": "t", "secret": "qmd_abc" }
+      },
+      "credential": { "deviceId": "d", "teamId": "t", "spaceId": "s", "kind": "token", "token": "qmd_abc" }
+    },
+    {
+      "description": "the broker the platform returns for the device's zone is kept",
+      "status": 200,
+      "body": {
+        "data": {
+          "deviceId": "d",
+          "spaceId": "s",
+          "teamId": "t",
+          "secret": "qmd_abc",
+          "broker": { "host": "gw.test-sg-sin-a.qualithm.com", "port": 8883 }
+        }
+      },
+      "credential": {
+        "deviceId": "d",
+        "teamId": "t",
+        "spaceId": "s",
+        "kind": "token",
+        "token": "qmd_abc",
+        "broker": { "host": "gw.test-sg-sin-a.qualithm.com", "port": 8883 }
+      }
+    },
+    {
+      "description": "an expiring credential keeps its expiry",
+      "status": 200,
+      "body": {
+        "data": {
+          "deviceId": "d",
+          "spaceId": "s",
+          "teamId": "t",
+          "secret": "qmd_abc",
+          "credential": { "kind": "token", "expiresAt": "2027-01-01T00:00:00.000Z" }
+        }
+      },
+      "credential": {
+        "deviceId": "d",
+        "teamId": "t",
+        "spaceId": "s",
+        "kind": "token",
+        "token": "qmd_abc",
+        "expiresAt": "2027-01-01T00:00:00.000Z"
+      }
+    }
+  ],
+  "errors": [
+    { "description": "a rejected code", "status": 401, "body": { "message": "nope" }, "message": "nope" },
+    { "description": "a body that isn't JSON", "status": 500, "raw": "not json", "message": "claim failed with status 500" }
+  ]
+}

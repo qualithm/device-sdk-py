@@ -1,0 +1,16 @@
+#!/bin/sh
+# Runs exactly the commands in .claude/checks.json, which match CI.
+# Enable once per clone: git config core.hooksPath .githooks
+set -e
+exec python3 - <<'PY'
+import json
+import subprocess
+import sys
+
+with open(".claude/checks.json", encoding="utf-8") as file:
+    commands = json.load(file)["commands"]
+for command in commands:
+    print(f"==> {command['run']}", flush=True)
+    if subprocess.run(command["run"], shell=True, check=False, cwd=command.get("dir", ".")).returncode != 0:
+        sys.exit(1)
+PY

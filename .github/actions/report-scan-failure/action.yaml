@@ -1,0 +1,54 @@
+# Vendored by dx/scripts/audit-sync from dx's .github/actions/report-scan-failure/action.yaml. Do not edit directly — change the source in dx and re-run audit-sync.
+
+name: "Report or resolve scan failure"
+description: >
+  Files (or bumps) a labelled issue when an automated check reports a problem, or closes it once the
+  check is healthy again and nobody has claimed it yet. Dedupes on the issue title, so re-runs never
+  pile up duplicate issues. When `body` is supplied it is kept in sync on every report, so a check
+  that reports findings in the body rather than pass/fail never shows stale data. The default
+  `security-audit` label (and the `off-board` label) keep these off the Engineering board (Decision
+  #66) — promote one manually with `dx project add` if it turns into real, multi-session work.
+inputs:
+  mode:
+    description: "report (check just failed) or resolve (check just passed)"
+    required: true
+  title:
+    description: "Stable anchor used as both the issue title and the dedup key."
+    required: true
+  github-token:
+    description: "Token with qualithm/pm issues:write (a PROJECTS_GH_APP token)."
+    required: true
+  label:
+    description: >
+      Space/comma-separated labels to apply and dedup under (default: security-audit). Include an
+      off-board marker (security-audit or off-board) to keep the issue off the Engineering board.
+    required: false
+    default: "security-audit"
+  body:
+    description:
+      "Issue body for mode=report. Also refreshes an existing issue's body when it differs, so a
+      report whose value lives in the body stays current; an unchanged body is a no-op. Omit it to
+      keep the plain bump-with-a-comment behaviour and the generic scan-failure body."
+    required: false
+    default: ""
+  run-url:
+    description: "URL of the workflow run to link from the issue (mode: report)."
+    required: false
+    default: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+# Issues are filed on the qualithm/pm tracker (Decision pm#2), not the calling repo — titles
+# already carry the repo name, so dedup is unaffected. The token must write to pm's issues: use a
+# PROJECTS_GH_APP token (org apps can write private repos from public-repo workflows; a public
+# repo's GITHUB_TOKEN cannot).
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        SOURCE_REPO: ${{ github.repository }}
+        MODE: ${{ inputs.mode }}
+        TITLE: ${{ inputs.title }}
+        LABELS: ${{ inputs.label }}
+        BODY: ${{ inputs.body }}
+        RUN_URL: ${{ inputs.run-url }}
+      run: ${{ github.action_path }}/run.sh
