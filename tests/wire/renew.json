@@ -1,0 +1,60 @@
+{
+  "source": "platform src/management/post-provision-renew.ts and src/lib/device-auth.ts (device-sdk-js has no renewal yet)",
+  "proofTag": "qualithm-renew-v1",
+  "token": {
+    "current": {
+      "deviceId": "d",
+      "teamId": "t",
+      "spaceId": "s",
+      "kind": "token",
+      "token": "qmd_abc",
+      "issuedAt": "2026-01-01T00:00:00.000Z",
+      "expiresAt": "2026-01-31T00:00:00.000Z"
+    },
+    "authorization": "Basic ZDpxbWRfYWJj",
+    "status": 201,
+    "body": {
+      "success": true,
+      "message": "Credential renewed",
+      "data": {
+        "credential": { "id": "c2", "kind": "token", "expiresAt": "2026-03-02T00:00:00.000Z", "rotatedFrom": "c1" },
+        "secret": "qmd_new"
+      }
+    }
+  },
+  "cert": {
+    "current": {
+      "deviceId": "d",
+      "teamId": "t",
+      "spaceId": "s",
+      "kind": "cert",
+      "privateKeyPem": "old-key",
+      "certificatePem": "old-cert",
+      "caCertificatePem": "ca-pem",
+      "issuedAt": "2026-01-01T00:00:00.000Z",
+      "expiresAt": "2026-01-31T00:00:00.000Z",
+      "broker": { "host": "gw.sg-sin-a.qualithm.com", "port": 8883 }
+    },
+    "status": 201,
+    "body": {
+      "success": true,
+      "message": "Certificate renewed",
+      "data": {
+        "broker": { "host": "gw.sg-sin-a.qualithm.com", "port": 8883 },
+        "credential": { "id": "c2", "kind": "cert", "expiresAt": "2026-03-02T00:00:00.000Z" },
+        "certificatePem": "new-cert",
+        "caCertificatePem": "ca-pem"
+      }
+    }
+  },
+  "errors": [
+    {
+      "description": "a credential that never expires",
+      "status": 409,
+      "body": { "success": false, "message": "This credential does not expire, so it cannot be renewed" },
+      "message": "This credential does not expire, so it cannot be renewed"
+    },
+    { "description": "an expired or revoked credential", "status": 401, "body": { "message": "Invalid device credentials" }, "message": "Invalid device credentials" },
+    { "description": "the hourly limit", "status": 429, "body": { "message": "Too many requests" }, "message": "Too many requests" }
+  ]
+}
