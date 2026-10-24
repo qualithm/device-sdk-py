@@ -11,7 +11,7 @@ class RenewTest(unittest.TestCase):
     def test_renews_a_token_with_its_own_basic_auth(self):
         fixture = wire("renew")["token"]
         transport = FakeTransport(
-            {"/provision/credentials/renew": Response(fixture["status"], fixture["body"])}
+            {"/v1/provision/credentials/renew": Response(fixture["status"], fixture["body"])}
         )
         renewed = renew(
             transport,
@@ -24,7 +24,7 @@ class RenewTest(unittest.TestCase):
         self.assertEqual(renewed.expires_at, "2026-03-02T00:00:00.000Z")
         self.assertEqual(renewed.issued_at, "2026-01-21T00:00:00.000Z")
         _, url, headers, sent = transport.requests[0]
-        self.assertEqual(url, "https://x/provision/credentials/renew")
+        self.assertEqual(url, "https://x/v1/provision/credentials/renew")
         self.assertEqual(headers["authorization"], fixture["authorization"])
         self.assertIsNone(sent)
 
@@ -32,7 +32,7 @@ class RenewTest(unittest.TestCase):
         fixture = wire("renew")
         cert = fixture["cert"]
         transport = FakeTransport(
-            {"/provision/credentials/renew": Response(cert["status"], cert["body"])}
+            {"/v1/provision/credentials/renew": Response(cert["status"], cert["body"])}
         )
         crypto = FakeCrypto()
         renewed = renew(
@@ -64,7 +64,7 @@ class RenewTest(unittest.TestCase):
         fixture = wire("renew")
         for case in fixture["errors"]:
             transport = FakeTransport(
-                {"/provision/credentials/renew": Response(case["status"], case["body"])}
+                {"/v1/provision/credentials/renew": Response(case["status"], case["body"])}
             )
             with self.assertRaises(RenewError) as caught:
                 renew(
