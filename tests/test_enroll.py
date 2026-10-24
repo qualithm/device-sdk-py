@@ -12,7 +12,7 @@ class EnrollTest(unittest.TestCase):
         fixture = wire("enroll")
         for case in fixture["cases"]:
             transport = FakeTransport(
-                {"/provision/credentials/cert": Response(case["status"], case["body"])}
+                {"/v1/provision/credentials/cert": Response(case["status"], case["body"])}
             )
             crypto = FakeCrypto()
             claimed = Credential.from_dict(fixture["claimed"])
@@ -33,7 +33,7 @@ class EnrollTest(unittest.TestCase):
             assert credential.broker is not None
             self.assertEqual(credential.broker.to_dict(), case["broker"])
             _, url, headers, sent = transport.requests[0]
-            self.assertEqual(url, "https://api.example.com/provision/credentials/cert")
+            self.assertEqual(url, "https://api.example.com/v1/provision/credentials/cert")
             self.assertEqual(headers["authorization"], fixture["authorization"])
             self.assertEqual(sent, {"csrPem": "csr-for-d-1", "label": "lab", "expiresInDays": 30})
 
@@ -42,7 +42,7 @@ class EnrollTest(unittest.TestCase):
         for case in fixture["errors"]:
             raw = case["raw"].encode() if "raw" in case else None
             transport = FakeTransport(
-                {"/provision/credentials/cert": Response(case["status"], case.get("body"), raw)}
+                {"/v1/provision/credentials/cert": Response(case["status"], case.get("body"), raw)}
             )
             with self.assertRaises(EnrollError) as caught:
                 enroll_certificate(

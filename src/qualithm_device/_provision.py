@@ -13,9 +13,9 @@ if TYPE_CHECKING:
 
     ErrorType = type[ClaimError] | type[EnrollError] | type[RenewError]
 
-CLAIM_PATH = "/provision/claim"
-CERT_PATH = "/provision/credentials/cert"
-RENEW_PATH = "/provision/credentials/renew"
+CLAIM_PATH = "/v1/provision/claim"
+CERT_PATH = "/v1/provision/credentials/cert"
+RENEW_PATH = "/v1/provision/credentials/renew"
 #: The prefix of the bytes a device signs to renew a certificate.
 RENEW_PROOF_TAG = "qualithm-renew-v1"
 _OK_MIN = 200

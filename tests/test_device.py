@@ -26,7 +26,7 @@ def clock(seconds):
 
 def claimed_transport(**kwargs):
     body = wire("claim")["cases"][1]["body"]
-    return FakeTransport({"/provision/claim": Response(200, body)}, **kwargs)
+    return FakeTransport({"/v1/provision/claim": Response(200, body)}, **kwargs)
 
 
 class ConnectTest(unittest.TestCase):
@@ -92,7 +92,7 @@ class ConnectTest(unittest.TestCase):
     def test_renews_a_due_credential_before_connecting(self):
         fixture = wire("renew")["token"]
         transport = FakeTransport(
-            {"/provision/credentials/renew": Response(fixture["status"], fixture["body"])}
+            {"/v1/provision/credentials/renew": Response(fixture["status"], fixture["body"])}
         )
         store = MemoryStore(fixture["current"])
         device = connect(URL, transport, store, broker_host="gw", now=clock(JAN_21_2026))
@@ -103,7 +103,7 @@ class ConnectTest(unittest.TestCase):
     def test_connects_on_the_old_credential_when_renewal_fails(self):
         fixture = wire("renew")
         transport = FakeTransport(
-            {"/provision/credentials/renew": Response(429, fixture["errors"][2]["body"])}
+            {"/v1/provision/credentials/renew": Response(429, fixture["errors"][2]["body"])}
         )
         device = connect(
             URL,
@@ -230,7 +230,7 @@ class RenewIfDueTest(unittest.TestCase):
     def test_stores_the_renewed_credential_once_due(self):
         fixture = wire("renew")["token"]
         device, store = self.connected(
-            {"/provision/credentials/renew": Response(201, fixture["body"])}, JAN_21_2026
+            {"/v1/provision/credentials/renew": Response(201, fixture["body"])}, JAN_21_2026
         )
         self.assertTrue(device.renew_if_due())
         self.assertEqual(store.saves[-1]["token"], "qmd_new")
@@ -243,7 +243,7 @@ class RenewIfDueTest(unittest.TestCase):
 
     def test_keeps_the_failure_and_the_old_credential(self):
         device, store = self.connected(
-            {"/provision/credentials/renew": Response(500, raw=b"oops")}, JAN_21_2026
+            {"/v1/provision/credentials/renew": Response(500, raw=b"oops")}, JAN_21_2026
         )
         self.assertFalse(device.renew_if_due())
         assert device.renew_error is not None
