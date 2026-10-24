@@ -85,7 +85,7 @@ class RequestTest(PicoCase):
         fake_socket.response = http(200, b'{"data": {}}')
 
         status, body = pico.Transport(timeout_s=5).request(
-            "POST", URL + "/provision/claim", {"content-type": "application/json"}, b'{"a": 1}'
+            "POST", URL + "/v1/provision/claim", {"content-type": "application/json"}, b'{"a": 1}'
         )
 
         self.assertEqual((status, body), (200, b'{"data": {}}'))
@@ -100,7 +100,7 @@ class RequestTest(PicoCase):
         self.assertIsNone(context.cert_chain)
         self.assertEqual(
             sock.written,
-            b"POST /provision/claim HTTP/1.1\r\nHost: api.example.com\r\nConnection: close\r\n"
+            b"POST /v1/provision/claim HTTP/1.1\r\nHost: api.example.com\r\nConnection: close\r\n"
             b"content-type: application/json\r\nContent-Length: 8\r\n\r\n"
             b'{"a": 1}',
         )
