@@ -67,7 +67,8 @@ class FakeTransport:
         )
         if self.unreachable:
             raise OSError("ECONNREFUSED")
-        path = url[url.index("/provision") :]
+        after_host = url.split("//", 1)[-1]
+        path = after_host[after_host.index("/") :]
         response = self.responses[path]
         return response.status, response.raw
 
