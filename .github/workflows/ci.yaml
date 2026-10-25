@@ -218,6 +218,29 @@ jobs:
           path: coverage/
           retention-days: 14
 
+  docs:
+    name: Docs
+    needs: changes
+    # Full tier: the API docs build only on the main hop, where a release is
+    # cut from. pdoc imports every module, so a warning (a module that
+    # fails to import, a bad reference) fails it.
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.is-main == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --locked
+      - name: Build the API docs (pdoc)
+        run: |
+          set -euo pipefail
+          packages=()
+          for init in src/*/__init__.py; do packages+=("$(basename "$(dirname "$init")")"); done
+          uv run --no-sync --with pdoc==16.0.0 python -W error -m pdoc -o "$RUNNER_TEMP/docs" "${packages[@]}"
+
   image-pins:
     name: Image Pins
     # Every image reference in the repo must match the vendored dx registry
@@ -297,7 +320,7 @@ jobs:
   ci-required:
     name: CI Required
     if: always()
-    needs: [changes, lint, typecheck, test, build, coverage, micropython, image-pins]
+    needs: [changes, lint, typecheck, test, build, coverage, micropython, docs, image-pins]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
