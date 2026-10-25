@@ -1,5 +1,9 @@
+# Base block, the same in every repo
 .DS_Store
 .env*
+.idea/
+.vscode/
+coverage/
 
 # uv
 .venv/
@@ -12,11 +16,9 @@ __pycache__/
 # Coverage
 .coverage
 .coverage.*
-coverage/
 
 # Tool caches
 .pytest_cache/
 .ruff_cache/
 
 # IDE
-.idea/
