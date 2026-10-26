@@ -96,6 +96,15 @@ def main() -> None:
             "https://api.example.com",
             transport=ScriptedTransport(),
             store=MemoryStore(),
+            capabilities=[
+                {
+                    "key": "temperature",
+                    "type": "sensor",
+                    "metric": "temperature",
+                    "unit": "celsius",
+                },
+                {"key": "power", "type": "onoff"},
+            ],
             claim_code="qmc_example",
         )
         device.publish_reading({"temperature": 21.4})
