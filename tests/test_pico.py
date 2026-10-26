@@ -12,7 +12,7 @@ from device_fakes import wire
 from pico_case import STORE_PATH, PicoCase, http
 from umqtt import simple
 
-from qualithm_device import CredentialError, connect, pico
+from qualithm_device import CapabilityError, CredentialError, connect, pico
 from qualithm_device._roots import ROOTS
 
 URL = "https://api.example.com"
@@ -355,13 +355,7 @@ class ConnectTest(PicoCase):
         fake_socket.response = http(200, json.dumps(claimed["body"]).encode())
         wlan = pico.join_wifi("home", "secret")
 
-        device = connect(
-            URL,
-            pico.Transport(),
-            pico.FlashStore(STORE_PATH),
-            claim_code="qmc_x.y",
-            now=lambda: JAN_21_2026,
-        )
+        device = pico.connect(URL, store=pico.FlashStore(STORE_PATH), claim_code="qmc_x.y")
         device.publish_reading(pico.system_info(wlan))
 
         stored = pico.FlashStore(STORE_PATH).load() or {}
@@ -373,8 +367,70 @@ class ConnectTest(PicoCase):
             ("gw.test-sg-sin-a.qualithm.com", "d", "qmd_abc"),
         )
         topic, payload = client.published[0]
+        self.assertEqual(topic, "capabilities")
+        declared = json.loads(payload)["capabilities"]
+        topic, payload = client.published[1]
         self.assertEqual(topic, "telemetry")
-        self.assertIn("chip_temperature_c", json.loads(payload)["metrics"])
+        self.assertEqual(
+            sorted(entry["config"]["metric"] for entry in declared),
+            sorted(json.loads(payload)["metrics"]),
+        )
+
+    def test_declares_the_system_sensors_with_their_units(self):
+        fake_socket.response = http(200, json.dumps(wire("claim")["cases"][1]["body"]).encode())
+        own = {
+            "key": "soil_moisture",
+            "type": "sensor",
+            "metric": "soil_moisture",
+            "unit": "percent",
+        }
+
+        pico.connect(
+            URL, store=pico.FlashStore(STORE_PATH), claim_code="qmc_x.y", capabilities=[own]
+        )
+
+        topic, payload = simple.MQTTClient.instances[0].published[0]
+        self.assertEqual(topic, "capabilities")
+        self.assertEqual(
+            json.loads(payload)["capabilities"],
+            [
+                {
+                    "key": "uptime_s",
+                    "type": "sensor",
+                    "config": {"metric": "uptime_s", "unit": "seconds"},
+                },
+                {
+                    "key": "free_memory_bytes",
+                    "type": "sensor",
+                    "config": {"metric": "free_memory_bytes", "unit": "bytes"},
+                },
+                {
+                    "key": "chip_temperature_c",
+                    "type": "sensor",
+                    "config": {"metric": "chip_temperature_c", "unit": "celsius"},
+                },
+                {
+                    "key": "wifi_rssi_dbm",
+                    "type": "sensor",
+                    "config": {"metric": "wifi_rssi_dbm", "unit": "dBm"},
+                },
+                {
+                    "key": "firmware_version",
+                    "type": "sensor",
+                    "config": {"metric": "firmware_version"},
+                },
+                {
+                    "key": "soil_moisture",
+                    "type": "sensor",
+                    "config": {"metric": "soil_moisture", "unit": "percent"},
+                },
+            ],
+        )
+
+    def test_refuses_a_capability_that_reuses_a_system_sensor_key(self):
+        with self.assertRaises(CapabilityError):
+            pico.connect(URL, capabilities=[{"key": "uptime_s", "type": "trigger"}])
+        self.assertEqual(simple.MQTTClient.instances, [])
 
     def test_renewal_replaces_the_stored_token(self):
         fixture = wire("renew")["token"]
@@ -382,7 +438,14 @@ class ConnectTest(PicoCase):
         store.save(fixture["current"])
         fake_socket.response = http(fixture["status"], json.dumps(fixture["body"]).encode())
 
-        device = connect(URL, pico.Transport(), store, broker_host="gw", now=lambda: JAN_21_2026)
+        device = connect(
+            URL,
+            pico.Transport(),
+            store,
+            capabilities=pico.SYSTEM_SENSORS,
+            broker_host="gw",
+            now=lambda: JAN_21_2026,
+        )
 
         self.assertIn(
             b"authorization: " + fixture["authorization"].encode(), fake_socket.sockets[0].written
@@ -397,7 +460,14 @@ class ConnectTest(PicoCase):
         store.save(fixture["current"])
         fake_socket.response = b'HTTP/1.1 200 OK\r\nContent-Length: 99\r\n\r\n{"da'
 
-        device = connect(URL, pico.Transport(), store, broker_host="gw", now=lambda: JAN_21_2026)
+        device = connect(
+            URL,
+            pico.Transport(),
+            store,
+            capabilities=pico.SYSTEM_SENSORS,
+            broker_host="gw",
+            now=lambda: JAN_21_2026,
+        )
 
         self.assertIsNotNone(device.renew_error)
         self.assertEqual(store.load(), fixture["current"])

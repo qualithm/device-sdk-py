@@ -5,7 +5,8 @@
 [![PyPI](https://img.shields.io/pypi/v/qualithm-device)](https://pypi.org/project/qualithm-device/)
 
 Device SDK for MicroPython and Python devices connecting to Qualithm. One `connect()` call claims
-the device once, stores its credential, renews it before it expires, and opens its gateway session.
+the device once, stores its credential, renews it before it expires, opens its gateway session, and
+declares what the device can do.
 
 ## Features
 
@@ -13,6 +14,8 @@ the device once, stores its credential, renews it before it expires, and opens i
   stored credential.
 - **Renewal on time.** A token or certificate credential renews two thirds of the way through its
   lifetime, and a failed renewal keeps the device on its current credential.
+- **Capabilities declared on every connect.** Dashboards and automations list what a device
+  declares, so every device declares at least one capability.
 - **Certificate enrollment.** A token credential upgrades to an mTLS certificate.
 - **The gateway's subject grammar.** Device-relative topics, capability commands and readings are
   checked before they go on the wire.
@@ -57,15 +60,10 @@ the platform gives you when you add a device.
    ```python
    import time
 
-   from qualithm_device import connect, pico
+   from qualithm_device import pico
 
    wlan = pico.join_wifi("<your-ssid>", "<your-password>")
-   device = connect(
-       "https://api.qualithm.com",
-       transport=pico.Transport(),
-       store=pico.FlashStore(),
-       claim_code="<your-claim-code>",
-   )
+   device = pico.connect("https://api.qualithm.com", claim_code="<your-claim-code>")
    while True:
        device.publish_reading(pico.system_info(wlan))
        device.poll()
@@ -80,8 +78,9 @@ the platform gives you when you add a device.
    ```
 
 The board claims itself on first boot and stores its credential in flash. Every minute it sends its
-uptime, free memory, chip temperature, Wi-Fi signal strength and firmware version. On a later boot
-it reuses the stored credential, so the claim code is no longer needed.
+uptime, free memory, chip temperature, Wi-Fi signal strength and firmware version. `pico.connect`
+declares each of these as a sensor, so they appear on a dashboard. On a later boot the board reuses
+the stored credential, so the claim code is no longer needed.
 
 `join_wifi` sets the clock from NTP, since the board checks each server's certificate and its
 dates. A Pico connects with a token credential: it has no on-board key generation for a
@@ -96,6 +95,9 @@ device = connect(
     "https://api.qualithm.com",
     transport=transport,  # the board's HTTPS and MQTT clients
     store=store,  # where the credential persists
+    capabilities=[
+        {"key": "temperature", "type": "sensor", "metric": "temperature", "unit": "celsius"},
+    ],
     claim_code="<your-claim-code>",
 )
 device.publish_reading({"temperature": 21.4})
@@ -116,11 +118,43 @@ The core holds the protocol; the board supplies three adapters, typed in
 | `crypto`    | `generate_csr(device_id)` and `sign(private_key_pem, message)`  |
 | `store`     | `load()`, `save(credential)` and `clear()`                      |
 
-`qualithm_device.pico` holds the Pico 2 W and Pico W adapters: `Transport`, `FlashStore`, and
-`join_wifi` and `system_info`.
+`qualithm_device.pico` holds the Pico 2 W and Pico W adapters: `Transport`, `FlashStore`,
+`join_wifi` and `system_info`, and `connect`, which uses them and declares `system_info`'s sensors.
 
 `transport.open` returns a session with `publish`, `subscribe`, `poll`, `close` and
 `max_packet_size`. `crypto` is needed only for a certificate credential.
+
+### Capabilities
+
+Every device declares its capabilities at `connect()`: at least one, each with a unique `key`.
+`connect()` raises `CapabilityError` for a missing, empty or invalid list, before it claims. Each
+connect publishes the declarations to the reserved `capabilities` topic. Dashboards and automations
+list only what a device declares.
+
+| `type`    | Fields                                   | Commands carry      |
+| --------- | ---------------------------------------- | ------------------- |
+| `sensor`  | `metric`, optional `unit`                | nothing (read-only) |
+| `onoff`   | none                                     | `True` or `False`   |
+| `range`   | `min`, `max`, optional `step` and `unit` | a number            |
+| `enum`    | `options`, at least one string           | one of the options  |
+| `trigger` | none                                     | `None`              |
+
+A sensor's `metric` names the reading it reports, as `publish_reading` sends it. On a Pico, pass
+your own sensors to `pico.connect` and it declares them after the board's:
+
+```python
+device = pico.connect(
+    "https://api.qualithm.com",
+    claim_code="<your-claim-code>",
+    capabilities=[
+        {"key": "soil_moisture", "type": "sensor", "metric": "soil_moisture", "unit": "percent"},
+    ],
+)
+device.publish_reading({"soil_moisture": 41.5})
+```
+
+`device.declare_capabilities([...])` replaces the set and publishes it at once. The next
+`connect()` publishes the list passed to it.
 
 ### Commands
 
@@ -131,7 +165,8 @@ while True:
         print(topic, payload)
 ```
 
-A handler gets the command's value, or `None` for a trigger.
+A handler gets the command's value, or `None` for a trigger. Declare the key as a control first: a
+sensor's key raises `CapabilityError`.
 
 ### Renewal and reconnecting
 
@@ -145,6 +180,7 @@ Every error subclasses `QualithmDeviceError`:
 
 | Error                  | Raised when                                                            |
 | ---------------------- | ---------------------------------------------------------------------- |
+| `CapabilityError`      | no capability is declared, one is invalid, or a command hits a sensor  |
 | `ClaimError`           | the claim endpoint is unreachable or rejects the code                  |
 | `CredentialError`      | nothing is stored and there's no claim code, or the credential expired |
 | `EnrollError`          | certificate enrollment fails                                           |

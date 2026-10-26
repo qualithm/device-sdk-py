@@ -10,6 +10,10 @@
       "https://github.com/qualithm/device-sdk-py/releases/download/0.0.0/qualithm_device._backoff.mpy"
     ],
     [
+      "qualithm_device/_capability.mpy",
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.0.0/qualithm_device._capability.mpy"
+    ],
+    [
       "qualithm_device/_credential.mpy",
       "https://github.com/qualithm/device-sdk-py/releases/download/0.0.0/qualithm_device._credential.mpy"
     ],

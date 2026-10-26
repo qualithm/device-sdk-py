@@ -4,20 +4,30 @@ import unittest
 from device_fakes import FakeTransport, MemoryStore, Response, wire
 
 from qualithm_device import (
+    CapabilityError,
     Credential,
     CredentialError,
     GatewayError,
     PayloadTooLargeError,
     TopicError,
-    connect,
     renew_due,
     resolve_broker,
 )
+from qualithm_device import connect as connect_with
 
 URL = "https://api.example.com"
 JAN_1_2026 = 1767225600
 JAN_21_2026 = 1768953600
 FEB_1_2026 = 1769904000
+
+TEMPERATURE = {"key": "temperature", "type": "sensor", "metric": "temperature", "unit": "celsius"}
+
+
+def connect(*args, **kwargs):
+    """connect() declaring one sensor unless the test passes its own capabilities."""
+    if "capabilities" not in kwargs:
+        kwargs["capabilities"] = [TEMPERATURE]
+    return connect_with(*args, **kwargs)
 
 
 def clock(seconds):
@@ -51,7 +61,7 @@ class ConnectTest(unittest.TestCase):
                 "keepalive_s": 60,
             },
         )
-        topic, payload = transport.sessions[0].published[0]
+        topic, payload = transport.sessions[0].published[1]
         self.assertEqual(topic, "telemetry")
         self.assertEqual(
             json.loads(payload.decode()),
@@ -121,11 +131,54 @@ class ConnectTest(unittest.TestCase):
         device = connect(URL, FakeTransport(), MemoryStore(stored), now=clock(JAN_21_2026))
         self.assertIsNotNone(device.renew_error)
 
+    def test_publishes_the_manifest_first_on_every_connect(self):
+        fixture = wire("capabilities")
+        stored = wire("credential")["credentials"][0]["credential"]
+        transport = FakeTransport()
+        for _ in range(2):
+            connect(
+                URL,
+                transport,
+                MemoryStore(stored),
+                capabilities=fixture["declarations"],
+                broker_host="gw",
+                now=clock(JAN_1_2026),
+            ).close()
+        for session in transport.sessions:
+            topic, payload = session.published[0]
+            self.assertEqual(topic, "capabilities")
+            self.assertEqual(json.loads(payload.decode()), fixture["manifest"])
+
+    def test_requires_capabilities_before_claiming(self):
+        for capabilities in (None, [], fixture_invalid()[1]):
+            transport = claimed_transport()
+            with self.assertRaises(CapabilityError):
+                connect(
+                    URL,
+                    transport,
+                    MemoryStore(),
+                    capabilities=capabilities,
+                    claim_code="qmc_x.y",
+                    now=clock(JAN_1_2026),
+                )
+            self.assertEqual(transport.requests, [])
+            self.assertEqual(transport.opened, [])
+
+    def test_closes_the_session_when_the_manifest_is_refused(self):
+        transport = claimed_transport(max_packet_size=8)
+        with self.assertRaises(PayloadTooLargeError):
+            connect(URL, transport, MemoryStore(), claim_code="qmc_x.y", now=clock(JAN_1_2026))
+        self.assertTrue(transport.sessions[0].closed)
+
     def test_reports_a_refused_session(self):
         transport = claimed_transport()
         transport.refuse = True
         with self.assertRaises(GatewayError):
             connect(URL, transport, MemoryStore(), claim_code="qmc_x.y", now=clock(JAN_1_2026))
+
+
+def fixture_invalid():
+    return wire("capabilities")["invalid"]
 
 
 class BrokerChoiceTest(unittest.TestCase):
@@ -152,12 +205,13 @@ class RenewDueTest(unittest.TestCase):
 
 class DeviceTest(unittest.TestCase):
     def setUp(self):
-        self.transport = claimed_transport(max_packet_size=64)
+        self.transport = claimed_transport(max_packet_size=256)
         self.store = MemoryStore()
         self.device = connect(
             URL, self.transport, self.store, claim_code="qmc_x.y", now=clock(JAN_1_2026)
         )
         self.session = self.transport.sessions[0]
+        self.session.published = []
 
     def test_publishes_text_and_bytes(self):
         self.device.publish("events/door", "open")
@@ -168,8 +222,8 @@ class DeviceTest(unittest.TestCase):
 
     def test_refuses_a_payload_over_the_gateway_ceiling(self):
         with self.assertRaises(PayloadTooLargeError) as caught:
-            self.device.publish("telemetry", b"x" * 65)
-        self.assertEqual((caught.exception.max_bytes, caught.exception.actual_bytes), (64, 65))
+            self.device.publish("telemetry", b"x" * 257)
+        self.assertEqual((caught.exception.max_bytes, caught.exception.actual_bytes), (256, 257))
 
     def test_checks_topics_before_sending(self):
         with self.assertRaises(TopicError):
@@ -199,6 +253,29 @@ class DeviceTest(unittest.TestCase):
     def test_rejects_an_invalid_command_key(self):
         with self.assertRaises(TopicError):
             self.device.on_command("bad key", print)
+
+    def test_a_sensor_takes_no_commands(self):
+        with self.assertRaises(CapabilityError):
+            self.device.on_command("temperature", print)
+        self.assertEqual(self.session.subscribed, [])
+
+    def test_redeclares_and_publishes_the_new_manifest(self):
+        self.device.declare_capabilities([{"key": "temperature", "type": "onoff"}])
+        topic, payload = self.session.published[0]
+        self.assertEqual(topic, "capabilities")
+        self.assertEqual(
+            json.loads(payload.decode()),
+            {"capabilities": [{"key": "temperature", "type": "onoff", "config": {}}]},
+        )
+        self.device.on_command("temperature", print)
+        self.assertEqual(self.session.subscribed, ["command/#"])
+
+    def test_refuses_an_invalid_redeclaration(self):
+        with self.assertRaises(CapabilityError):
+            self.device.declare_capabilities([])
+        self.assertEqual(self.session.published, [])
+        with self.assertRaises(CapabilityError):
+            self.device.on_command("temperature", print)
 
     def test_reports_a_dropped_session(self):
         self.session.fail = True
