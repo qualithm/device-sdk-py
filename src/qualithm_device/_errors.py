@@ -56,6 +56,10 @@ class TopicError(QualithmDeviceError):
     """A topic, capability key or command payload breaks the wire grammar."""
 
 
+class CapabilityError(QualithmDeviceError):
+    """A capability declaration is missing, empty or invalid, or a command targets a sensor."""
+
+
 class PayloadTooLargeError(QualithmDeviceError):
     """A publish exceeds the payload ceiling the gateway advertised.
 

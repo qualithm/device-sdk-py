@@ -1,13 +1,15 @@
 """Qualithm Device SDK for MicroPython and Python devices.
 
-`connect()` claims a device once, persists its credential, renews it on time and opens its
-gateway session, over transport, crypto and store adapters the board supplies.
+`connect()` claims a device once, persists its credential, renews it on time, opens its gateway
+session and declares its capabilities, over transport, crypto and store adapters the board
+supplies.
 """
 
 from qualithm_device._backoff import RECONNECT_CAP_MS, RECONNECT_FLOOR_MS, reconnect_delay
 from qualithm_device._credential import Broker, Credential, parse_broker
 from qualithm_device._device import Device, connect, renew_due, resolve_broker
 from qualithm_device._errors import (
+    CapabilityError,
     ClaimError,
     CredentialError,
     EnrollError,
@@ -39,6 +41,7 @@ __all__ = [
     "RECONNECT_FLOOR_MS",
     "TELEMETRY_TOPIC",
     "Broker",
+    "CapabilityError",
     "ClaimError",
     "Command",
     "Credential",
