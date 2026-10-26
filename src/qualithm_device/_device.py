@@ -1,18 +1,23 @@
 """`connect()` and the `Device` it returns: claim once, renew on time, keep one gateway session."""
 
+import json
 import time
 
+from qualithm_device._capability import build_manifest
 from qualithm_device._credential import CERT, Broker, Credential
 from qualithm_device._errors import (
+    CapabilityError,
     CredentialError,
     GatewayError,
     PayloadTooLargeError,
+    QualithmDeviceError,
     RenewError,
     TopicError,
 )
 from qualithm_device._provision import claim, renew
 from qualithm_device._subject import (
     COMMAND_FILTER,
+    MANIFEST_TOPIC,
     TELEMETRY_TOPIC,
     check_publish_topic,
     check_topic_filter,
@@ -24,7 +29,7 @@ from qualithm_device._subject import (
 
 TYPE_CHECKING = False
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping, Sequence
 
     from qualithm_device.interfaces import Crypto, Session, Store, Transport
 
@@ -95,6 +100,7 @@ class Device:
         store: "Store",
         provisioning_url: str,
         now: "Callable[[], float]",
+        manifest: "dict[str, object]",
     ) -> None:
         """Take over an open session; use `connect()` rather than calling this."""
         self.credential = credential
@@ -107,6 +113,7 @@ class Device:
         self._now = now
         self._handlers: dict[str, CommandHandler] = {}
         self._commands_subscribed = False
+        self._sensors = _sensor_keys(manifest)
 
     def _open(self) -> "Session":
         if self._session is None:
@@ -179,14 +186,34 @@ class Device:
 
         Raises:
             TopicError: The key is invalid.
+            CapabilityError: The key is a declared sensor, which is read-only.
             GatewayError: The device is closed, or the subscribe failed.
         """
         if not is_valid_capability_key(key):
             raise TopicError(f"invalid capability key: {key}")
+        if key in self._sensors:
+            raise CapabilityError(f"capability {key} is a sensor and takes no commands")
         self._handlers[key] = handler
         if not self._commands_subscribed:
             self.subscribe(COMMAND_FILTER)
             self._commands_subscribed = True
+
+    def declare_capabilities(self, capabilities: "Sequence[Mapping[str, object]]") -> None:
+        """Replace the device's capabilities and publish the new manifest now.
+
+        A later `connect()` publishes the capabilities passed to it, so pass the same set there.
+
+        Args:
+            capabilities: At least one capability declaration, each with a unique key.
+
+        Raises:
+            CapabilityError: The list is empty or a declaration is invalid.
+            PayloadTooLargeError: The manifest exceeds the gateway's ceiling.
+            GatewayError: The device is closed, or the publish failed.
+        """
+        manifest = build_manifest(capabilities)
+        self.publish(MANIFEST_TOPIC, json.dumps(manifest))
+        self._sensors = _sensor_keys(manifest)
 
     def poll(self) -> "list[tuple[str, bytes]]":
         """Service the session, run command handlers, and return every other message.
@@ -248,6 +275,12 @@ class Device:
             session.close()
 
 
+def _sensor_keys(manifest: "dict[str, object]") -> "list[object]":
+    """The keys of a manifest's sensors, which take no commands."""
+    entries: list[dict[str, object]] = manifest["capabilities"]  # pyright: ignore[reportAssignmentType] -- build_manifest's shape
+    return [entry["key"] for entry in entries if entry["type"] == "sensor"]
+
+
 def _try_renew(
     credential: Credential,
     transport: "Transport",
@@ -271,6 +304,7 @@ def connect(  # noqa: PLR0913 -- the hero API takes every option by keyword
     transport: "Transport",
     store: "Store",
     *,
+    capabilities: "Sequence[Mapping[str, object]] | None" = None,
     crypto: "Crypto | None" = None,
     claim_code: "str | None" = None,
     name: "str | None" = None,
@@ -282,13 +316,18 @@ def connect(  # noqa: PLR0913 -- the hero API takes every option by keyword
     """Claim once, renew when due, and open the gateway session.
 
     On first boot the claim code is exchanged and the credential stored; every later boot loads
-    it and skips claiming, since a claim code works once.
+    it and skips claiming, since a claim code works once. Every connect publishes the capability
+    manifest to the reserved `capabilities` topic, so dashboards and automations list what the
+    device declares.
 
     Args:
         provisioning_url: The provisioning API for the claim code's environment, e.g.
             `https://api.qualithm.com`.
         transport: The board's HTTPS and MQTT clients.
         store: Where the credential persists.
+        capabilities: What the device can do or report, at least one declaration (Decision
+            qualithm/pm#747), e.g. `[{"key": "temperature", "type": "sensor",
+            "metric": "temperature", "unit": "celsius"}]`. Checked before anything else.
         crypto: Key generation and signing; needed only for a certificate credential.
         claim_code: The single-use claim code, read only when nothing is stored.
         name: A human-friendly device name set at claim.
@@ -301,11 +340,16 @@ def connect(  # noqa: PLR0913 -- the hero API takes every option by keyword
         The connected device.
 
     Raises:
+        CapabilityError: No capabilities are declared, or a declaration is invalid.
         CredentialError: Nothing is stored and there's no claim code, or the stored credential
             is malformed or expired (claim the device again).
         ClaimError: The claim failed.
-        GatewayError: No broker is known, or the gateway refused the session.
+        GatewayError: No broker is known, the gateway refused the session, or the manifest
+            publish failed.
+        PayloadTooLargeError: The manifest exceeds the gateway's ceiling.
     """
+    # Before claiming, so a bad declaration never spends the single-use claim code.
+    manifest = build_manifest(capabilities)
     clock = time.time if now is None else now
     stored = store.load()
     if stored is not None:
@@ -344,6 +388,13 @@ def connect(  # noqa: PLR0913 -- the hero API takes every option by keyword
         raise GatewayError(
             f"failed to connect to the gateway at {broker.host}:{broker.port}: {err}"
         ) from err
-    device = Device(session, credential, transport, crypto, store, provisioning_url, clock)
+    device = Device(
+        session, credential, transport, crypto, store, provisioning_url, clock, manifest
+    )
     device.renew_error = renew_error
+    try:
+        device.publish(MANIFEST_TOPIC, json.dumps(manifest))
+    except QualithmDeviceError:
+        device.close()
+        raise
     return device

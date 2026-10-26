@@ -1,17 +1,11 @@
 """Adapters for a Raspberry Pi Pico 2 W or Pico W on MicroPython (Decisions qualithm/pm#2292, 2293).
 
-Join Wi-Fi, then hand `Transport` and `FlashStore` to `connect()`:
+Join Wi-Fi, then `connect()` over `Transport` and `FlashStore`, declaring `system_info`'s sensors:
 
-    from qualithm_device import connect
     from qualithm_device import pico
 
     wlan = pico.join_wifi("<your-ssid>", "<your-password>")
-    device = connect(
-        "https://api.qualithm.com",
-        transport=pico.Transport(),
-        store=pico.FlashStore(),
-        claim_code="<your-claim-code>",
-    )
+    device = pico.connect("https://api.qualithm.com", claim_code="<your-claim-code>")
     device.publish_reading(pico.system_info(wlan))
 
 Every TLS connection requires a certificate that chains to the bundled roots and names the host.
@@ -32,14 +26,18 @@ import ntptime
 import tls
 from umqtt.simple import MQTTClient, MQTTException
 
+from qualithm_device._device import DEFAULT_KEEPALIVE_S
+from qualithm_device._device import connect as _connect
 from qualithm_device._errors import CredentialError, QualithmDeviceError
 from qualithm_device._roots import ROOTS
 
 TYPE_CHECKING = False
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping, Sequence
 
     from tls import SSLSocket as Stream
+
+    from qualithm_device._device import Device
 
 DEFAULT_STORE_PATH = "/qualithm-credential.json"
 DEFAULT_TIMEOUT_S = 10
@@ -53,6 +51,22 @@ _SENSOR_VOLTS_AT_27C = 0.706
 _SENSOR_VOLTS_PER_C = 0.001721
 _ADC_VOLTS = 3.3
 _ADC_FULL_SCALE = 65535
+
+
+#: The sensors `system_info` reports, which `pico.connect` declares on every board.
+SYSTEM_SENSORS: "tuple[dict[str, object], ...]" = (
+    {"key": "uptime_s", "type": "sensor", "metric": "uptime_s", "unit": "seconds"},
+    {"key": "free_memory_bytes", "type": "sensor", "metric": "free_memory_bytes", "unit": "bytes"},
+    {
+        "key": "chip_temperature_c",
+        "type": "sensor",
+        "metric": "chip_temperature_c",
+        "unit": "celsius",
+    },
+    {"key": "wifi_rssi_dbm", "type": "sensor", "metric": "wifi_rssi_dbm", "unit": "dBm"},
+    # Unitless: major * 10000 + minor * 100 + patch, so a dashboard shows which build is running.
+    {"key": "firmware_version", "type": "sensor", "metric": "firmware_version"},
+)
 
 
 class WifiError(QualithmDeviceError):
@@ -467,3 +481,54 @@ def system_info(wlan: "network.WLAN") -> "dict[str, float]":
         "wifi_rssi_dbm": wlan.status("rssi"),
         "firmware_version": major * 10000 + minor * 100 + patch,
     }
+
+
+def connect(  # noqa: PLR0913 -- the core connect()'s options, by keyword
+    provisioning_url: str,
+    *,
+    capabilities: "Sequence[Mapping[str, object]]" = (),
+    claim_code: "str | None" = None,
+    name: "str | None" = None,
+    transport: "Transport | None" = None,
+    store: "FlashStore | None" = None,
+    broker_host: "str | None" = None,
+    broker_port: "int | None" = None,
+    keepalive_s: int = DEFAULT_KEEPALIVE_S,
+) -> "Device":
+    """Connect a Pico, declaring `SYSTEM_SENSORS` and any capabilities of its own.
+
+    Args:
+        provisioning_url: The provisioning API for the claim code's environment, e.g.
+            `https://api.qualithm.com`.
+        capabilities: The board's own capability declarations, declared after `SYSTEM_SENSORS`.
+        claim_code: The single-use claim code, read only when nothing is stored.
+        name: A human-friendly device name set at claim.
+        transport: The HTTPS and MQTT clients; a `Transport()` by default.
+        store: Where the credential persists; a `FlashStore()` by default.
+        broker_host: The gateway to use instead of the one the platform assigned.
+        broker_port: The gateway port, overriding either source's.
+        keepalive_s: The MQTT keep-alive interval.
+
+    Returns:
+        The connected device.
+
+    Raises:
+        CapabilityError: A declaration is invalid, or reuses a system sensor's key.
+        CredentialError: Nothing is stored and there's no claim code, or the stored credential
+            is malformed or expired (claim the device again).
+        ClaimError: The claim failed.
+        GatewayError: No broker is known, the gateway refused the session, or the manifest
+            publish failed.
+    """
+    return _connect(
+        provisioning_url,
+        Transport() if transport is None else transport,
+        FlashStore() if store is None else store,
+        capabilities=list(SYSTEM_SENSORS) + list(capabilities),
+        claim_code=claim_code,
+        name=name,
+        broker_host=broker_host,
+        broker_port=broker_port,
+        keepalive_s=keepalive_s,
+        now=time.time,
+    )
