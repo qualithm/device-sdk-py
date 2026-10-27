@@ -29,6 +29,23 @@ class JoinWifiTest(PicoCase):
         self.assertEqual(wlan.joined, ("home", "secret"))
         self.assertEqual(ntptime.calls, 1)
 
+    def test_joins_wpa2_and_wpa3_networks_alike(self):
+        pico.join_wifi("home", "secret")
+
+        self.assertEqual(network.WLAN.instances[-1].security, network.WLAN.SEC_WPA2_WPA3)
+
+    def test_keeps_the_driver_default_on_firmware_without_wpa3(self):
+        saved = network.WLAN.SEC_WPA2_WPA3
+        del network.WLAN.SEC_WPA2_WPA3
+        try:
+            pico.join_wifi("home", "secret")
+        finally:
+            network.WLAN.SEC_WPA2_WPA3 = saved
+
+        wlan = network.WLAN.instances[-1]
+        self.assertEqual(wlan.joined, ("home", "secret"))
+        self.assertIsNone(wlan.security)
+
     def test_waits_while_the_network_connects(self):
         network.WLAN.statuses = [network.STAT_CONNECTING, network.STAT_CONNECTING, 3]
 
@@ -47,8 +64,10 @@ class JoinWifiTest(PicoCase):
     def test_names_why_the_network_refused(self):
         for status, reason in (
             (network.STAT_WRONG_PASSWORD, "wrong password"),
+            (network.STAT_WRONG_PASSWORD, "WPA2 or WPA3 Personal"),
             (network.STAT_NO_AP_FOUND, "2.4 GHz"),
             (network.STAT_CONNECT_FAIL, "status -1"),
+            (network.STAT_CONNECT_FAIL, "WPA2 or WPA3 Personal"),
         ):
             network.WLAN.statuses = [status]
             with self.assertRaises(pico.WifiError) as caught:
