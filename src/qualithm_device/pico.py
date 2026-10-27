@@ -1,12 +1,14 @@
 """Adapters for a Raspberry Pi Pico 2 W or Pico W on MicroPython (Decisions qualithm/pm#2292, 2293).
 
-Join Wi-Fi, then `connect()` over `Transport` and `FlashStore`, declaring `system_info`'s sensors:
+`start()` reads the setup file `qualithm deploy` writes, joins Wi-Fi and connects, declaring
+`system_info`'s sensors:
 
     from qualithm_device import pico
 
-    wlan = pico.join_wifi("<your-ssid>", "<your-password>")
-    device = pico.connect("https://api.qualithm.com", claim_code="<your-claim-code>")
-    device.publish_reading(pico.system_info(wlan))
+    device = pico.start()
+    device.publish_reading(pico.system_info())
+
+`join_wifi()` and `connect()` do the same steps with the details passed in.
 
 Every TLS connection requires a certificate that chains to the bundled roots and names the host.
 A Pico has no on-board key generation or signing, so it connects with a token credential and
@@ -40,6 +42,8 @@ if TYPE_CHECKING:
     from qualithm_device._device import Device
 
 DEFAULT_STORE_PATH = "/qualithm-credential.json"
+#: Where `qualithm deploy` writes the provisioning URL, Wi-Fi details and claim code.
+DEFAULT_SETUP_PATH = "/qualithm-setup.json"
 DEFAULT_TIMEOUT_S = 10
 WIFI_TIMEOUT_S = 30
 _CLOCK_ATTEMPTS = 3
@@ -71,6 +75,14 @@ SYSTEM_SENSORS: "tuple[dict[str, object], ...]" = (
 
 class WifiError(QualithmDeviceError):
     """The board couldn't join the Wi-Fi network or set its clock."""
+
+
+class SetupError(QualithmDeviceError):
+    """The setup file `qualithm deploy` writes is missing or malformed."""
+
+
+# The station interface the last `join_wifi` connected, for `system_info`.
+_station: "list[network.WLAN]" = []
 
 
 def join_wifi(ssid: str, password: str, *, timeout_s: int = WIFI_TIMEOUT_S) -> "network.WLAN":
@@ -106,6 +118,7 @@ def join_wifi(ssid: str, password: str, *, timeout_s: int = WIFI_TIMEOUT_S) -> "
                 raise WifiError(f"couldn't join {ssid} within {timeout_s} s")
             time.sleep(_POLL_S)
     _set_clock()
+    _station[:] = [wlan]
     return wlan
 
 
@@ -468,18 +481,20 @@ class FlashStore:
 _uptime = [0, 0]
 
 
-def system_info(wlan: "network.WLAN") -> "dict[str, float]":
+def system_info(wlan: "network.WLAN | None" = None) -> "dict[str, float]":
     """The board's vital signs, as a reading for `Device.publish_reading`.
 
     Call it at least every few days: the uptime counts across the tick counter's wrap only then.
 
     Args:
-        wlan: The station interface `join_wifi` returned.
+        wlan: The station interface; the one `join_wifi` or `start` last joined by default.
 
     Returns:
         `uptime_s`, `free_memory_bytes`, `chip_temperature_c`, `wifi_rssi_dbm`, and
         `firmware_version` as major * 10000 + minor * 100 + patch (12900 for 1.29.0).
     """
+    if wlan is None:
+        wlan = _station[0] if _station else network.WLAN(network.STA_IF)
     ticks = time.ticks_ms()  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownVariableType] -- MicroPython's time
     _uptime[0] += time.ticks_diff(ticks, _uptime[1])  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType] -- MicroPython's time
     _uptime[1] = ticks
@@ -544,3 +559,110 @@ def connect(  # noqa: PLR0913 -- the core connect()'s options, by keyword
         keepalive_s=keepalive_s,
         now=time.time,
     )
+
+
+def read_setup(path: str = DEFAULT_SETUP_PATH) -> "dict[str, object]":
+    """The setup file `qualithm deploy` writes.
+
+    Args:
+        path: Where it lives.
+
+    Returns:
+        `provisioningUrl`, `wifi` (`ssid`, `passphrase`) and, before the first claim, `claimCode`.
+
+    Raises:
+        SetupError: The file is missing, isn't JSON, or lacks a field.
+    """
+    try:
+        with open(path) as file:
+            text = file.read()
+    except OSError:
+        raise SetupError(
+            f"no setup file at {path}: run `qualithm deploy` to write one, or call"
+            " join_wifi() and connect() with the details"
+        ) from None
+    try:
+        data = json.loads(text)
+    except ValueError:
+        data = None
+    if not isinstance(data, dict):
+        raise SetupError(f"the setup file at {path} isn't a JSON object")
+    url = data.get("provisioningUrl")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] -- JSON
+    wifi = data.get("wifi")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] -- JSON
+    if not isinstance(url, str) or not url.startswith("https://"):
+        raise SetupError(f"the setup file at {path} has no https provisioningUrl")
+    if (
+        not isinstance(wifi, dict)
+        or not isinstance(wifi.get("ssid"), str)  # pyright: ignore[reportUnknownMemberType] -- JSON
+        or not wifi.get("ssid")  # pyright: ignore[reportUnknownMemberType] -- JSON
+        or not isinstance(wifi.get("passphrase"), str)  # pyright: ignore[reportUnknownMemberType] -- JSON
+    ):
+        raise SetupError(f"the setup file at {path} has no wifi ssid and passphrase")
+    code = data.get("claimCode")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] -- JSON
+    if code is not None and (not isinstance(code, str) or not code):
+        raise SetupError(f"the setup file at {path} has a claimCode that isn't a string")
+    return data  # pyright: ignore[reportUnknownVariableType] -- JSON
+
+
+def _forget_claim_code(path: str, setup: "dict[str, object]") -> None:
+    # The code is single-use; drop it once spent, replacing the file atomically as FlashStore does.
+    kept = {key: value for key, value in setup.items() if key != "claimCode"}
+    with open(path + ".tmp", "w") as file:
+        file.write(json.dumps(kept))
+    os.rename(path + ".tmp", path)
+
+
+def start(  # noqa: PLR0913 -- connect()'s options, by keyword
+    *,
+    capabilities: "Sequence[Mapping[str, object]]" = (),
+    name: "str | None" = None,
+    setup_path: str = DEFAULT_SETUP_PATH,
+    transport: "Transport | None" = None,
+    store: "FlashStore | None" = None,
+    broker_host: "str | None" = None,
+    broker_port: "int | None" = None,
+    keepalive_s: int = DEFAULT_KEEPALIVE_S,
+) -> "Device":
+    """Join Wi-Fi and connect with the setup file `qualithm deploy` wrote.
+
+    The first start claims the board with the file's claim code, then removes the code from the
+    file; later starts reconnect with the stored credential.
+
+    Args:
+        capabilities: The board's own capability declarations, declared after `SYSTEM_SENSORS`.
+        name: A human-friendly device name set at claim.
+        setup_path: Where the setup file lives.
+        transport: The HTTPS and MQTT clients; a `Transport()` by default.
+        store: Where the credential persists; a `FlashStore()` by default.
+        broker_host: The gateway to use instead of the one the platform assigned.
+        broker_port: The gateway port, overriding either source's.
+        keepalive_s: The MQTT keep-alive interval.
+
+    Returns:
+        The connected device. `system_info()` reads the Wi-Fi interface it joined.
+
+    Raises:
+        SetupError: The setup file is missing or malformed.
+        WifiError: The board couldn't join the network or set its clock.
+        CredentialError: Nothing is stored and the setup file has no claim code.
+        ClaimError: The claim failed.
+        GatewayError: The gateway refused the session.
+    """
+    setup = read_setup(setup_path)
+    wifi = setup["wifi"]
+    join_wifi(wifi["ssid"], wifi["passphrase"])  # pyright: ignore[reportIndexIssue, reportUnknownArgumentType] -- checked by read_setup
+    code = setup.get("claimCode")
+    device = connect(
+        str(setup["provisioningUrl"]),
+        capabilities=capabilities,
+        claim_code=code if isinstance(code, str) else None,
+        name=name,
+        transport=transport,
+        store=store,
+        broker_host=broker_host,
+        broker_port=broker_port,
+        keepalive_s=keepalive_s,
+    )
+    if code is not None:
+        _forget_claim_code(setup_path, setup)
+    return device
