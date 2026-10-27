@@ -90,7 +90,13 @@ def join_wifi(ssid: str, password: str, *, timeout_s: int = WIFI_TIMEOUT_S) -> "
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
     if not wlan.isconnected():
-        wlan.connect(ssid, password)
+        # WPA2/WPA3 mixed joins WPA2-only, mixed and WPA3-only networks; firmware without the
+        # constant keeps the driver's default, WPA2.
+        security = getattr(network.WLAN, "SEC_WPA2_WPA3", None)
+        if security is None:
+            wlan.connect(ssid, password)
+        else:
+            wlan.connect(ssid, password, security=security)  # pyright: ignore[reportCallIssue] -- the stubs lag the cyw43 driver, which takes it
         deadline = time.time() + timeout_s
         while not wlan.isconnected():
             status = wlan.status()
@@ -105,10 +111,16 @@ def join_wifi(ssid: str, password: str, *, timeout_s: int = WIFI_TIMEOUT_S) -> "
 
 def _wifi_reason(status: int) -> str:
     if status == network.STAT_WRONG_PASSWORD:
-        return "wrong password"
+        return (
+            "wrong password, or the network's security mode isn't WPA2 or WPA3 Personal"
+            " (enterprise networks aren't supported)"
+        )
     if status == network.STAT_NO_AP_FOUND:
         return "no network with that name answered (a Pico joins 2.4 GHz networks only)"
-    return f"the connection failed (status {status})"
+    return (
+        f"the connection failed (status {status}); check the password and that the network"
+        " uses WPA2 or WPA3 Personal"
+    )
 
 
 def _set_clock() -> None:
