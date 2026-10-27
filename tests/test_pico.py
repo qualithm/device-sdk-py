@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 
 import fake_gc
@@ -491,3 +492,109 @@ class ConnectTest(PicoCase):
         self.assertIsNotNone(device.renew_error)
         self.assertEqual(store.load(), fixture["current"])
         self.assertEqual(simple.MQTTClient.instances[0].pswd, "qmd_abc")
+
+
+SETUP_PATH = "/tmp/qualithm-device-test-setup.json"  # noqa: S108 -- MicroPython has no tempfile
+
+
+def write_setup(setup):
+    with open(SETUP_PATH, "w") as file:
+        file.write(setup if isinstance(setup, str) else json.dumps(setup))
+
+
+def read_back():
+    with open(SETUP_PATH) as file:
+        return json.loads(file.read())
+
+
+SETUP = {
+    "provisioningUrl": URL,
+    "wifi": {"ssid": "home", "passphrase": "secret"},
+    "claimCode": "qmc_x.y",
+}
+
+
+class StartTest(PicoCase):
+    """start() from the setup file `qualithm deploy` writes."""
+
+    def tearDown(self):
+        super().tearDown()
+        for path in (SETUP_PATH, SETUP_PATH + ".tmp"):
+            try:  # noqa: SIM105 -- MicroPython has no contextlib
+                os.remove(path)
+            except OSError:
+                pass
+
+    def test_joins_claims_and_forgets_the_claim_code(self):
+        claimed = wire("claim")["cases"][1]
+        fake_socket.response = http(200, json.dumps(claimed["body"]).encode())
+        write_setup(SETUP)
+        network.WLAN.rssi = -51
+
+        device = pico.start(setup_path=SETUP_PATH, store=pico.FlashStore(STORE_PATH))
+        device.publish_reading(pico.system_info())
+
+        self.assertEqual(network.WLAN.instances[-1].joined, ("home", "secret"))
+        stored = pico.FlashStore(STORE_PATH).load() or {}
+        self.assertEqual(stored["token"], claimed["credential"]["token"])
+        self.assertEqual(
+            read_back(),
+            {"provisioningUrl": URL, "wifi": {"ssid": "home", "passphrase": "secret"}},
+        )
+        _, payload = simple.MQTTClient.instances[0].published[1]
+        self.assertEqual(json.loads(payload)["metrics"]["wifi_rssi_dbm"], -51)
+
+    def test_reconnects_with_the_stored_credential_after_the_claim(self):
+        claimed = wire("claim")["cases"][1]
+        fake_socket.response = http(200, json.dumps(claimed["body"]).encode())
+        write_setup(SETUP)
+        pico.start(setup_path=SETUP_PATH, store=pico.FlashStore(STORE_PATH))
+        requests = len(fake_socket.sockets)
+
+        pico.start(setup_path=SETUP_PATH, store=pico.FlashStore(STORE_PATH))
+
+        self.assertEqual(len(fake_socket.sockets), requests)
+        self.assertEqual(len(simple.MQTTClient.instances), 2)
+
+    def test_keeps_the_claim_code_when_wifi_fails(self):
+        write_setup(SETUP)
+        network.WLAN.statuses = [network.STAT_WRONG_PASSWORD]
+
+        with self.assertRaises(pico.WifiError):
+            pico.start(setup_path=SETUP_PATH, store=pico.FlashStore(STORE_PATH))
+        self.assertEqual(read_back()["claimCode"], "qmc_x.y")
+
+    def test_needs_a_claim_code_or_a_stored_credential(self):
+        write_setup({"provisioningUrl": URL, "wifi": {"ssid": "home", "passphrase": "secret"}})
+
+        with self.assertRaises(CredentialError):
+            pico.start(setup_path=SETUP_PATH, store=pico.FlashStore(STORE_PATH))
+
+    def test_names_a_missing_setup_file(self):
+        with self.assertRaises(pico.SetupError) as caught:
+            pico.read_setup(SETUP_PATH)
+        self.assertIn("run `qualithm deploy`", str(caught.exception))
+
+    def test_refuses_a_malformed_setup_file(self):
+        wifi = {"ssid": "home", "passphrase": "secret"}
+        for setup, reason in (
+            ("{", "isn't a JSON object"),
+            ("[1]", "isn't a JSON object"),
+            ({"wifi": wifi}, "provisioningUrl"),
+            ({"provisioningUrl": "http://plain", "wifi": wifi}, "provisioningUrl"),
+            ({"provisioningUrl": URL}, "wifi ssid"),
+            ({"provisioningUrl": URL, "wifi": {"ssid": "", "passphrase": "x"}}, "wifi ssid"),
+            ({"provisioningUrl": URL, "wifi": {"ssid": "home"}}, "wifi ssid"),
+            ({"provisioningUrl": URL, "wifi": wifi, "claimCode": 3}, "claimCode"),
+            ({"provisioningUrl": URL, "wifi": wifi, "claimCode": ""}, "claimCode"),
+        ):
+            write_setup(setup)
+            with self.assertRaises(pico.SetupError) as caught:
+                pico.read_setup(SETUP_PATH)
+            self.assertIn(reason, str(caught.exception))
+
+    def test_system_info_reads_the_station_when_nothing_was_joined(self):
+        pico._station[:] = []
+        network.WLAN.rssi = -60
+
+        self.assertEqual(pico.system_info()["wifi_rssi_dbm"], -60)
