@@ -12,6 +12,9 @@ STAT_WRONG_PASSWORD = -3
 class WLAN:
     """A station interface. `statuses` scripts each status() after connect(); the last repeats."""
 
+    SEC_WPA3 = 0x01000004
+    SEC_WPA2_WPA3 = 0x01400004
+
     statuses = [STAT_GOT_IP]  # noqa: RUF012 -- state a test scripts
     connected = False
     rssi = -60
@@ -21,14 +24,16 @@ class WLAN:
         self.interface = interface
         self.is_active = False
         self.joined = None
+        self.security = None
         self._reads = 0
         WLAN.instances.append(self)
 
     def active(self, is_active):
         self.is_active = is_active
 
-    def connect(self, ssid, password):
+    def connect(self, ssid, password, security=None):
         self.joined = (ssid, password)
+        self.security = security
 
     def _current(self):
         if WLAN.connected:
