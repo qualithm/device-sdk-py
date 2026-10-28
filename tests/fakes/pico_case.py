@@ -28,8 +28,7 @@ class PicoCase(unittest.TestCase):
     def setUp(self):
         for fake in (fake_gc, fake_socket, fake_time, fake_tls, network, ntptime, simple):
             fake.reset()
-        machine.ADC.reading = 0
-        machine.ADC.channels = []
+        machine.reset()
         self._board = (pico.gc, pico.socket, pico.time, pico.tls)
         pico.gc = fake_gc
         pico.socket = fake_socket

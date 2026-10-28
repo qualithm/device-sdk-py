@@ -598,3 +598,109 @@ class StartTest(PicoCase):
         network.WLAN.rssi = -60
 
         self.assertEqual(pico.system_info()["wifi_rssi_dbm"], -60)
+
+
+class StatusLightTest(PicoCase):
+    """The board's LED, playing the device light states."""
+
+    def lit_at(self, ms):
+        fake_time.ticks = ms
+        machine.Timer.instances[-1].fire()
+        return machine.Pin.instances[-1].values[-1] == 1
+
+    def test_starts_dark_on_the_onboard_led(self):
+        light = pico.StatusLight()
+        pin = machine.Pin.instances[-1]
+        self.assertEqual((pin.name, pin.mode), ("LED", machine.Pin.OUT))
+        self.assertEqual(pin.values, [0])
+        self.assertEqual(light.state, "off")
+        self.assertEqual(machine.Timer.instances[-1].period, pico.LIGHT_TICK_MS)
+
+    def test_plays_a_state_from_its_start_and_writes_only_changes(self):
+        light = pico.StatusLight()
+        light.show("slow-pulse")
+        self.assertTrue(self.lit_at(999))
+        self.assertFalse(self.lit_at(1000))
+        self.assertFalse(self.lit_at(1500))
+        self.assertTrue(self.lit_at(2000))
+        self.assertEqual(machine.Pin.instances[-1].values, [0, 1, 0, 1])
+
+    def test_flashes_for_attention_on_a_one_colour_led(self):
+        light = pico.StatusLight()
+        light.show("steady-red")
+        self.assertTrue(self.lit_at(0))
+        self.assertFalse(self.lit_at(250))
+        self.assertTrue(self.lit_at(500))
+
+    def test_holds_attention_on_a_light_that_shows_red(self):
+        light = pico.StatusLight("RED", mono=False)
+        light.show("steady-red")
+        self.assertTrue(self.lit_at(250))
+
+    def test_reduced_motion_holds_a_pulse_still(self):
+        light = pico.StatusLight(reduced=True)
+        light.show("slow-pulse")
+        self.assertTrue(self.lit_at(1500))
+
+    def test_refuses_an_unknown_state(self):
+        light = pico.StatusLight()
+        with self.assertRaises(ValueError):
+            light.show("blinking")
+        self.assertEqual(light.state, "off")
+
+    def test_close_stops_the_timer_and_turns_the_led_off(self):
+        light = pico.StatusLight()
+        light.show("steady")
+        light.close()
+        self.assertTrue(machine.Timer.instances[-1].stopped)
+        self.assertEqual(machine.Pin.instances[-1].values[-1], 0)
+        self.assertEqual(light.state, "off")
+
+
+class StartLightTest(PicoCase):
+    """What the LED shows as start() and connect() run."""
+
+    def tearDown(self):
+        super().tearDown()
+        for path in (SETUP_PATH, SETUP_PATH + ".tmp"):
+            try:  # noqa: SIM105 -- MicroPython has no contextlib
+                os.remove(path)
+            except OSError:
+                pass
+
+    def test_plays_q_once_after_a_claim_then_steady_after_a_reconnect(self):
+        claimed = wire("claim")["cases"][1]
+        fake_socket.response = http(200, json.dumps(claimed["body"]).encode())
+        write_setup(SETUP)
+        light = pico.StatusLight()
+        pico.start(setup_path=SETUP_PATH, store=pico.FlashStore(STORE_PATH), light=light)
+        self.assertEqual(light.state, "q-once")
+        pico.start(setup_path=SETUP_PATH, store=pico.FlashStore(STORE_PATH), light=light)
+        self.assertEqual(light.state, "steady")
+
+    def test_shows_attention_when_wifi_fails(self):
+        write_setup(SETUP)
+        network.WLAN.statuses = [network.STAT_WRONG_PASSWORD]
+        light = pico.StatusLight()
+        with self.assertRaises(pico.WifiError):
+            pico.start(setup_path=SETUP_PATH, store=pico.FlashStore(STORE_PATH), light=light)
+        self.assertEqual(light.state, "steady-red")
+
+    def test_shows_attention_when_the_connect_fails(self):
+        write_setup({"provisioningUrl": URL, "wifi": {"ssid": "home", "passphrase": "secret"}})
+        light = pico.StatusLight()
+        with self.assertRaises(CredentialError):
+            pico.start(setup_path=SETUP_PATH, store=pico.FlashStore(STORE_PATH), light=light)
+        self.assertEqual(light.state, "steady-red")
+
+    def test_drives_the_onboard_led_by_default_and_none_leaves_it_alone(self):
+        write_setup(SETUP)
+        network.WLAN.statuses = [network.STAT_WRONG_PASSWORD]
+        with self.assertRaises(pico.WifiError):
+            pico.start(setup_path=SETUP_PATH, store=pico.FlashStore(STORE_PATH))
+        self.assertEqual(machine.Pin.instances[-1].name, "LED")
+        machine.reset()
+        network.WLAN.statuses = [network.STAT_WRONG_PASSWORD]
+        with self.assertRaises(pico.WifiError):
+            pico.start(setup_path=SETUP_PATH, store=pico.FlashStore(STORE_PATH), light=None)
+        self.assertEqual(machine.Pin.instances, [])
