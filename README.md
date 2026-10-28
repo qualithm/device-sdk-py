@@ -31,7 +31,7 @@ On a board running MicroPython 1.29.0:
 ```python
 import mip
 
-mip.install("github:qualithm/device-sdk-py@<version>")
+mip.install("github:qualithm/device-sdk-py@0.1.0")
 ```
 
 On CPython:
@@ -52,35 +52,44 @@ the platform gives you when you add a device.
 
    ```bash
    uvx mpremote exec "import network; w = network.WLAN(network.STA_IF); w.active(True); w.connect('<your-ssid>', '<your-password>')"
-   uvx mpremote exec "import mip; mip.install('github:qualithm/device-sdk-py@<version>')"
+   uvx mpremote exec "import mip; mip.install('github:qualithm/device-sdk-py@0.1.0')"
    ```
 
-3. Save this as `main.py`, with your network and claim code filled in:
+3. Write the setup file the board reads on boot, with your network and claim code filled in:
+
+   ```bash
+   uvx mpremote exec "import json; open('/qualithm-setup.json', 'w').write(json.dumps({'provisioningUrl': 'https://api.qualithm.com', 'wifi': {'ssid': '<your-ssid>', 'passphrase': '<your-password>'}, 'claimCode': '<your-claim-code>'}))"
+   ```
+
+4. Save this as `main.py`:
 
    ```python
    import time
 
    from qualithm_device import pico
 
-   wlan = pico.join_wifi("<your-ssid>", "<your-password>")
-   device = pico.connect("https://api.qualithm.com", claim_code="<your-claim-code>")
+   device = pico.start()
    while True:
-       device.publish_reading(pico.system_info(wlan))
+       device.publish_reading(pico.system_info())
        device.poll()
        device.renew_if_due()
        time.sleep(60)
    ```
 
-4. Copy it to the board and reset it:
+5. Copy it to the board and reset it:
 
    ```bash
    uvx mpremote cp main.py :main.py + reset
    ```
 
-The board claims itself on first boot and stores its credential in flash. Every minute it sends its
-uptime, free memory, chip temperature, Wi-Fi signal strength and firmware version. `pico.connect`
-declares each of these as a sensor, so they appear on a dashboard. On a later boot the board reuses
-the stored credential, so the claim code is no longer needed.
+`pico.start` joins the network in `/qualithm-setup.json` and connects. On first boot the board
+claims itself, stores its credential in flash, and removes the spent claim code from the setup
+file; on a later boot it reuses the stored credential. Every minute it sends its uptime, free
+memory, chip temperature, Wi-Fi signal strength and firmware version. `pico.start` declares each of
+these as a sensor, so they appear on a dashboard.
+
+To pass the details in code instead, call `pico.join_wifi(ssid, password)` and then
+`pico.connect(provisioning_url, claim_code=...)`.
 
 `join_wifi` sets the clock from NTP, since the board checks each server's certificate and its
 dates. A Pico connects with a token credential: it has no on-board key generation for a
