@@ -48,6 +48,10 @@
     [
       "qualithm_device/pico.mpy",
       "https://github.com/qualithm/device-sdk-py/releases/download/0.1.0/qualithm_device.pico.mpy"
+    ],
+    [
+      "qualithm_device/ui.mpy",
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.1.0/qualithm_device.ui.mpy"
     ]
   ],
   "deps": [
