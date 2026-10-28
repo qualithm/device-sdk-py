@@ -15,7 +15,8 @@ Icons and marks are packed row by row: each row takes whole bytes, its leftmost 
 The font is packed column by column: 5 bytes a glyph, left to right, the top row bit 0.
 
 The status light plays the states in LIGHT_STEPS. Ask what it shows a time after a state began, and
-pass `reduced=True` under the reduce-motion setting to get the still form of a state that moves:
+pass `reduced=True` under the reduce-motion setting to get the still form of a state that moves, and
+`mono=True` on a one-colour light to get the form it can show:
 
     on, color = ui.light_at("q-once", elapsed_ms)
 """
@@ -430,6 +431,10 @@ LIGHT_STEPS = {
         (False, 1000),
     ),
     "steady-red": ((True, 0),),
+    "fast-flash": (
+        (True, 250),
+        (False, 250),
+    ),
     "off": ((False, 0),),
 }
 
@@ -439,6 +444,7 @@ LIGHT_COLORS = {
     "q-once": "fg",
     "slow-pulse": "fg",
     "steady-red": "attention",
+    "fast-flash": "attention",
     "off": None,
 }
 
@@ -449,6 +455,7 @@ LIGHT_THEN = {
     "q-once": "steady",
     "slow-pulse": "slow-pulse",
     "steady-red": None,
+    "fast-flash": "fast-flash",
     "off": None,
 }
 
@@ -458,6 +465,17 @@ LIGHT_REDUCED = {
     "q-once": "steady",
     "slow-pulse": "steady",
     "steady-red": None,
+    "fast-flash": None,
+    "off": None,
+}
+
+#: The state a one-colour light shows instead of each state, or None when it shows the state itself.
+LIGHT_MONO = {
+    "steady": None,
+    "q-once": None,
+    "slow-pulse": None,
+    "steady-red": "fast-flash",
+    "fast-flash": None,
     "off": None,
 }
 
@@ -549,33 +567,41 @@ def text(fb: "Canvas", s: str, x: int, y: int, c: int = 1) -> int:
     return x
 
 
-def light_state(name: str, reduced: bool = False) -> str:
-    """The state the light shows for a state, taking reduced motion into account.
+def light_state(name: str, reduced: bool = False, mono: bool = False) -> str:
+    """The state the light shows for a state, on a one-colour light or under reduced motion.
 
     Args:
         name: The state's name, a key of LIGHT_STEPS.
         reduced: Whether the reduce-motion setting is on.
+        mono: Whether the light shows one colour only.
 
     Returns:
-        The state's name, or its still form when reduced and the state moves.
+        The state's name, its one-colour form when mono, or its still form when reduced and the
+        state moves.
 
     Raises:
         ValueError: When there is no light state of that name.
     """
     if name not in LIGHT_STEPS:
         raise ValueError("no light state named " + name)
+    instead = LIGHT_MONO[name]
+    if mono and instead is not None:
+        name = instead
     still = LIGHT_REDUCED[name]
     if reduced and still is not None:
         return still
     return name
 
 
-def light_steps(name: str, reduced: bool = False) -> "tuple[tuple[bool, int], ...]":
+def light_steps(
+    name: str, reduced: bool = False, mono: bool = False
+) -> "tuple[tuple[bool, int], ...]":
     """The (lit, milliseconds) steps a state plays; 0 milliseconds holds the step.
 
     Args:
         name: The state's name, a key of LIGHT_STEPS.
         reduced: Whether the reduce-motion setting is on.
+        mono: Whether the light shows one colour only.
 
     Returns:
         The steps of the state shown, before it moves on to its LIGHT_THEN.
@@ -583,10 +609,12 @@ def light_steps(name: str, reduced: bool = False) -> "tuple[tuple[bool, int], ..
     Raises:
         ValueError: When there is no light state of that name.
     """
-    return LIGHT_STEPS[light_state(name, reduced)]
+    return LIGHT_STEPS[light_state(name, reduced, mono)]
 
 
-def light_at(name: str, t_ms: int, reduced: bool = False) -> "tuple[bool, str | None]":
+def light_at(
+    name: str, t_ms: int, reduced: bool = False, mono: bool = False
+) -> "tuple[bool, str | None]":
     """Whether the light is lit, and in which colour role, a time after a state began.
 
     Args:
@@ -594,6 +622,7 @@ def light_at(name: str, t_ms: int, reduced: bool = False) -> "tuple[bool, str | 
         t_ms: Milliseconds since the state began; a state that plays once moves on to its
             LIGHT_THEN.
         reduced: Whether the reduce-motion setting is on.
+        mono: Whether the light shows one colour only.
 
     Returns:
         (lit, color): whether the light is on, and the colour role of the state playing.
@@ -603,7 +632,7 @@ def light_at(name: str, t_ms: int, reduced: bool = False) -> "tuple[bool, str | 
     """
     if t_ms < 0:
         raise ValueError("t_ms must not be negative")
-    state = light_state(name, reduced)
+    state = light_state(name, reduced, mono)
     while True:
         steps = LIGHT_STEPS[state]
         then = LIGHT_THEN[state]
