@@ -31,7 +31,7 @@ On a board running MicroPython 1.29.0:
 ```python
 import mip
 
-mip.install("github:qualithm/device-sdk-py@0.2.0")
+mip.install("github:qualithm/device-sdk-py@0.3.0")
 ```
 
 On CPython:
@@ -52,7 +52,7 @@ the platform gives you when you add a device.
 
    ```bash
    uvx mpremote exec "import network; w = network.WLAN(network.STA_IF); w.active(True); w.connect('<your-ssid>', '<your-password>')"
-   uvx mpremote exec "import mip; mip.install('github:qualithm/device-sdk-py@0.2.0')"
+   uvx mpremote exec "import mip; mip.install('github:qualithm/device-sdk-py@0.3.0')"
    ```
 
 3. Write the setup file the board reads on boot, with your network and claim code filled in:
@@ -107,6 +107,52 @@ To pass the details in code instead, call `pico.join_wifi(ssid, password)` and t
 `join_wifi` sets the clock from NTP, since the board checks each server's certificate and its
 dates. A Pico connects with a token credential: it has no on-board key generation for a
 certificate.
+
+## Run it as a virtual device
+
+A virtual device runs your project on MicroPython's Unix port on your computer, with no board. It
+claims, connects and reports as a Pico does, and counts as a device on your plan. You need a claim
+code.
+
+1. Install MicroPython 1.29.0 and the SDK:
+
+   ```bash
+   brew install micropython
+   micropython -m mip install github:qualithm/device-sdk-py@0.3.0
+   ```
+
+2. Write the setup file in your project's directory, with your claim code filled in:
+
+   ```bash
+   echo '{"provisioningUrl": "https://api.qualithm.com", "claimCode": "<your-claim-code>"}' > qualithm-setup.json
+   ```
+
+3. Save this as `main.py`. It runs unchanged on a Pico 2 W:
+
+   ```python
+   import time
+
+   from qualithm_device import board
+
+   device = board.start()
+   while True:
+       device.publish_reading(board.system_info())
+       device.poll()
+       device.renew_if_due()
+       time.sleep(60)
+   ```
+
+4. Run it:
+
+   ```bash
+   micropython main.py
+   ```
+
+`board.start` uses the `pico` adapters on a Pico and the `virtual` adapters anywhere else. The
+virtual device tells the platform it is virtual when it claims. It stores its credential in
+`qualithm-credential.json`, next to the setup file. Anyone who can read that directory can read
+the credential. Every minute it sends its uptime, free memory, firmware version and a stand-in chip
+temperature that swings around 25 °C.
 
 ## Quick Start
 
