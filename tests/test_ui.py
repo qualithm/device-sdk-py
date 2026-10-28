@@ -61,7 +61,10 @@ class UiTest(unittest.TestCase):
         self.assertEqual(ui.light_at("slow-pulse", 2 * on_ms * 1000), (True, "fg"))
 
     def test_holds_still_under_reduced_motion(self):
+        flashes = set(ui.LIGHT_MONO.values())
         for name in ui.LIGHT_STEPS:
+            if name in flashes:
+                continue
             steps = ui.light_steps(name, reduced=True)
             self.assertEqual(len(steps), 1, name)
             self.assertEqual(steps[0][1], 0, name)
@@ -72,6 +75,11 @@ class UiTest(unittest.TestCase):
         for t_ms in range(0, 10_000, ui.LIGHT_UNIT_MS):
             self.assertEqual(ui.light_at("steady-red", t_ms), (True, "attention"))
         self.assertEqual(ui.light_at("off", 0), (False, None))
+
+    def test_flashes_attention_on_a_one_colour_light_even_when_reduced(self):
+        self.assertEqual(ui.light_at("steady-red", 0, mono=True), (True, "attention"))
+        self.assertEqual(ui.light_at("steady-red", 250, mono=True), (False, "attention"))
+        self.assertEqual(ui.light_at("steady-red", 250, True, True), (False, "attention"))
 
     def test_rejects_an_unknown_light_or_negative_time(self):
         with self.assertRaises(ValueError):
