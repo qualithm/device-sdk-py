@@ -68,13 +68,14 @@ def _field(data: "dict[str, object]", key: str, error: "ErrorType") -> str:
     return value
 
 
-def claim(
+def claim(  # noqa: PLR0913 -- the request's fields, plus the injected transport and clock
     transport: "Transport",
     provisioning_url: str,
     code: str,
     now: float,
     *,
     name: "str | None" = None,
+    virtual: bool = False,
 ) -> Credential:
     """Exchange a single-use claim code for the device's credential.
 
@@ -84,6 +85,8 @@ def claim(
         code: The claim code, as issued (it starts with `qmc_`).
         now: The current Unix time, recorded as the credential's issue time.
         name: A human-friendly device name to set at claim.
+        virtual: Declare the device virtual: it runs on a host, not a board. It counts as a
+            device all the same.
 
     Returns:
         The credential, ready to store.
@@ -94,6 +97,8 @@ def claim(
     body: dict[str, object] = {"code": code}
     if name is not None:
         body["name"] = name
+    if virtual:
+        body["virtual"] = True
     data = _post(transport, _url(provisioning_url, CLAIM_PATH), {}, body, ClaimError, "claim")
     issued = data.get("credential")
     kind = TOKEN

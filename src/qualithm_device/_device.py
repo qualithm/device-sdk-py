@@ -312,6 +312,7 @@ def connect(  # noqa: PLR0913 -- the hero API takes every option by keyword
     broker_port: "int | None" = None,
     keepalive_s: int = DEFAULT_KEEPALIVE_S,
     now: "Callable[[], float] | None" = None,
+    virtual: bool = False,
 ) -> Device:
     """Claim once, renew when due, and open the gateway session.
 
@@ -335,6 +336,7 @@ def connect(  # noqa: PLR0913 -- the hero API takes every option by keyword
         broker_port: The gateway port, overriding either source's.
         keepalive_s: The MQTT keep-alive interval.
         now: The clock, in Unix seconds; `time.time` by default.
+        virtual: Declare the device virtual at claim: it runs on a host, not a board.
 
     Returns:
         The connected device.
@@ -355,7 +357,9 @@ def connect(  # noqa: PLR0913 -- the hero API takes every option by keyword
     if stored is not None:
         credential = Credential.from_dict(stored)
     elif claim_code:
-        credential = claim(transport, provisioning_url, claim_code, clock(), name=name)
+        credential = claim(
+            transport, provisioning_url, claim_code, clock(), name=name, virtual=virtual
+        )
         store.save(credential.to_dict())
     else:
         raise CredentialError("no stored credential and no claim code provided")

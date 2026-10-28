@@ -29,6 +29,12 @@ class ClaimTest(unittest.TestCase):
         self.assertEqual(headers["content-type"], "application/json")
         self.assertEqual(sent, {"code": "qmc_x.y", "name": "kitchen"})
 
+    def test_declares_a_virtual_device_at_claim(self):
+        body = wire("claim")["cases"][0]["body"]
+        transport = FakeTransport({"/v1/provision/claim": Response(200, body)})
+        claim(transport, "https://api.example.com/", "qmc_x.y", JAN_1_2026, virtual=True)
+        self.assertEqual(transport.requests[0][3], {"code": "qmc_x.y", "virtual": True})
+
     def test_reports_the_platform_message_and_status(self):
         for case in wire("claim")["errors"]:
             raw = case["raw"].encode() if "raw" in case else None
