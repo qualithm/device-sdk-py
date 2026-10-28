@@ -46,3 +46,35 @@ class UiTest(unittest.TestCase):
             ui.draw_icon(Screen(), "missing", 0, 0)
         with self.assertRaises(ValueError):
             ui.draw_mark(Screen(), 7, 0, 0)
+
+    def test_plays_q_once_then_holds_steady(self):
+        self.assertEqual(ui.light_at("q-once", 0), (True, "fg"))
+        self.assertEqual(ui.light_at("q-once", 3 * ui.LIGHT_UNIT_MS), (False, "fg"))
+        q_ms = sum(abs(units) for units in ui.LIGHT_Q) * ui.LIGHT_UNIT_MS
+        self.assertEqual(sum(ms for _, ms in ui.light_steps("q-once")), q_ms)
+        self.assertEqual(ui.light_at("q-once", q_ms + 5000), (True, "fg"))
+
+    def test_repeats_the_slow_pulse(self):
+        on_ms = ui.light_steps("slow-pulse")[0][1]
+        self.assertEqual(ui.light_at("slow-pulse", 0), (True, "fg"))
+        self.assertEqual(ui.light_at("slow-pulse", on_ms), (False, "fg"))
+        self.assertEqual(ui.light_at("slow-pulse", 2 * on_ms * 1000), (True, "fg"))
+
+    def test_holds_still_under_reduced_motion(self):
+        for name in ui.LIGHT_STEPS:
+            steps = ui.light_steps(name, reduced=True)
+            self.assertEqual(len(steps), 1, name)
+            self.assertEqual(steps[0][1], 0, name)
+        self.assertEqual(ui.light_state("q-once", reduced=True), "steady")
+        self.assertEqual(ui.light_state("off", reduced=True), "off")
+
+    def test_never_blinks_attention(self):
+        for t_ms in range(0, 10_000, ui.LIGHT_UNIT_MS):
+            self.assertEqual(ui.light_at("steady-red", t_ms), (True, "attention"))
+        self.assertEqual(ui.light_at("off", 0), (False, None))
+
+    def test_rejects_an_unknown_light_or_negative_time(self):
+        with self.assertRaises(ValueError):
+            ui.light_state("missing")
+        with self.assertRaises(ValueError):
+            ui.light_at("steady", -1)
