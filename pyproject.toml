@@ -1,7 +1,7 @@
 [project]
 name = "qualithm-device"
 # 0.0.0 marks the package unreleased; package.json carries the same version.
-version = "0.0.0"
+version = "0.1.0"
 description = "Device SDK for MicroPython and Python devices connecting to Qualithm."
 readme = "README.md"
 license = "Apache-2.0"
