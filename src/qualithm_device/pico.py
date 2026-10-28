@@ -10,6 +10,14 @@
 
 `join_wifi()` and `connect()` do the same steps with the details passed in.
 
+The board's LED shows where it is (Decision qualithm/pm#2727): a slow pulse while it joins Wi-Fi
+and reaches the gateway, Q once after a claim, steady once connected, and a fast flash when it needs
+attention. Pass `light=None` to leave the LED alone, or a `StatusLight` to keep showing states:
+
+    light = pico.StatusLight()
+    device = pico.start(light=light)
+    light.show("steady-red")
+
 Every TLS connection requires a certificate that chains to the bundled roots and names the host.
 A Pico has no on-board key generation or signing, so it connects with a token credential and
 `connect()` takes no `crypto`.
@@ -32,6 +40,7 @@ from qualithm_device._device import DEFAULT_KEEPALIVE_S
 from qualithm_device._device import connect as _connect
 from qualithm_device._errors import CredentialError, QualithmDeviceError
 from qualithm_device._roots import ROOTS
+from qualithm_device.ui import light_at, light_state
 
 TYPE_CHECKING = False
 if TYPE_CHECKING:
@@ -79,6 +88,80 @@ class WifiError(QualithmDeviceError):
 
 class SetupError(QualithmDeviceError):
     """The setup file `qualithm deploy` writes is missing or malformed."""
+
+
+#: The status light's tick, in milliseconds: fine enough for the rhythm's 140 ms unit.
+LIGHT_TICK_MS = 20
+
+
+class StatusLight:
+    """The board's status light, playing the device light states from a timer.
+
+    A state comes from `ui.LIGHT_STEPS`: `steady`, `q-once`, `slow-pulse`, `steady-red` or `off`.
+    """
+
+    def __init__(
+        self,
+        pin: "str | machine.Pin" = "LED",
+        *,
+        mono: bool = True,
+        reduced: bool = False,
+        timer: "machine.Timer | None" = None,
+    ) -> None:
+        """Take the LED and start the timer, dark.
+
+        Args:
+            pin: The LED's pin name, or the pin; the Pico W's on-board LED by default.
+            mono: Whether the LED shows one colour only, as the Pico's does.
+            reduced: Whether to show the still form of a state that moves.
+            timer: The timer that plays the states; a new software timer by default.
+        """
+        self._pin = machine.Pin(pin, machine.Pin.OUT) if isinstance(pin, str) else pin
+        self._mono = mono
+        self._reduced = reduced
+        self._state = "off"
+        self._began = time.ticks_ms()  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownVariableType] -- MicroPython's time
+        self._lit: "bool | None" = None
+        self._timer = machine.Timer(-1) if timer is None else timer
+        self._pin.value(0)
+        self._timer.init(period=LIGHT_TICK_MS, mode=machine.Timer.PERIODIC, callback=self._tick)
+
+    @property
+    def state(self) -> str:
+        """The state the light was last asked to show."""
+        return self._state
+
+    def show(self, state: str) -> None:
+        """Play a state from its start.
+
+        Args:
+            state: A key of `ui.LIGHT_STEPS`.
+
+        Raises:
+            ValueError: When there is no light state of that name.
+        """
+        light_state(state)
+        self._state = state
+        self._began = time.ticks_ms()  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType] -- MicroPython's time
+        self._tick()
+
+    def close(self) -> None:
+        """Stop the timer and turn the LED off."""
+        self._timer.deinit()
+        self._state = "off"
+        self._pin.value(0)
+        self._lit = False
+
+    def _tick(self, _timer: object = None) -> None:
+        elapsed = time.ticks_diff(time.ticks_ms(), self._began)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownVariableType] -- MicroPython's time
+        lit, _ = light_at(self._state, max(0, elapsed), self._reduced, self._mono)  # pyright: ignore[reportUnknownArgumentType] -- MicroPython's time
+        if lit != self._lit:
+            self._pin.value(1 if lit else 0)
+            self._lit = lit
+
+
+def _light(light: "StatusLight | str | None") -> "StatusLight | None":
+    return StatusLight(light) if isinstance(light, str) else light
 
 
 # The station interface the last `join_wifi` connected, for `system_info`.
@@ -521,6 +604,7 @@ def connect(  # noqa: PLR0913 -- the core connect()'s options, by keyword
     broker_host: "str | None" = None,
     broker_port: "int | None" = None,
     keepalive_s: int = DEFAULT_KEEPALIVE_S,
+    light: "StatusLight | str | None" = "LED",
 ) -> "Device":
     """Connect a Pico, declaring `SYSTEM_SENSORS` and any capabilities of its own.
 
@@ -535,6 +619,9 @@ def connect(  # noqa: PLR0913 -- the core connect()'s options, by keyword
         broker_host: The gateway to use instead of the one the platform assigned.
         broker_port: The gateway port, overriding either source's.
         keepalive_s: The MQTT keep-alive interval.
+        light: The status light: a `StatusLight`, an LED pin name, or None to leave the LED alone.
+            It pulses while connecting, plays Q once after a claim, then stays steady, and shows
+            attention when the connect fails.
 
     Returns:
         The connected device.
@@ -547,18 +634,31 @@ def connect(  # noqa: PLR0913 -- the core connect()'s options, by keyword
         GatewayError: No broker is known, the gateway refused the session, or the manifest
             publish failed.
     """
-    return _connect(
-        provisioning_url,
-        Transport() if transport is None else transport,
-        FlashStore() if store is None else store,
-        capabilities=list(SYSTEM_SENSORS) + list(capabilities),
-        claim_code=claim_code,
-        name=name,
-        broker_host=broker_host,
-        broker_port=broker_port,
-        keepalive_s=keepalive_s,
-        now=time.time,
-    )
+    status = _light(light)
+    store = FlashStore() if store is None else store
+    if status is not None:
+        status.show("slow-pulse")
+    try:
+        claiming = claim_code is not None and store.load() is None
+        device = _connect(
+            provisioning_url,
+            Transport() if transport is None else transport,
+            store,
+            capabilities=list(SYSTEM_SENSORS) + list(capabilities),
+            claim_code=claim_code,
+            name=name,
+            broker_host=broker_host,
+            broker_port=broker_port,
+            keepalive_s=keepalive_s,
+            now=time.time,
+        )
+    except (QualithmDeviceError, OSError):
+        if status is not None:
+            status.show("steady-red")
+        raise
+    if status is not None:
+        status.show("q-once" if claiming else "steady")
+    return device
 
 
 def read_setup(path: str = DEFAULT_SETUP_PATH) -> "dict[str, object]":
@@ -622,6 +722,7 @@ def start(  # noqa: PLR0913 -- connect()'s options, by keyword
     broker_host: "str | None" = None,
     broker_port: "int | None" = None,
     keepalive_s: int = DEFAULT_KEEPALIVE_S,
+    light: "StatusLight | str | None" = "LED",
 ) -> "Device":
     """Join Wi-Fi and connect with the setup file `qualithm deploy` wrote.
 
@@ -637,6 +738,9 @@ def start(  # noqa: PLR0913 -- connect()'s options, by keyword
         broker_host: The gateway to use instead of the one the platform assigned.
         broker_port: The gateway port, overriding either source's.
         keepalive_s: The MQTT keep-alive interval.
+        light: The status light: a `StatusLight`, an LED pin name, or None to leave the LED alone.
+            It pulses from the start, plays Q once after a claim, then stays steady, and shows
+            attention when any step fails.
 
     Returns:
         The connected device. `system_info()` reads the Wi-Fi interface it joined.
@@ -648,9 +752,17 @@ def start(  # noqa: PLR0913 -- connect()'s options, by keyword
         ClaimError: The claim failed.
         GatewayError: The gateway refused the session.
     """
-    setup = read_setup(setup_path)
-    wifi = setup["wifi"]
-    join_wifi(wifi["ssid"], wifi["passphrase"])  # pyright: ignore[reportIndexIssue, reportUnknownArgumentType] -- checked by read_setup
+    status = _light(light)
+    if status is not None:
+        status.show("slow-pulse")
+    try:
+        setup = read_setup(setup_path)
+        wifi = setup["wifi"]
+        join_wifi(wifi["ssid"], wifi["passphrase"])  # pyright: ignore[reportIndexIssue, reportUnknownArgumentType] -- checked by read_setup
+    except (QualithmDeviceError, OSError):
+        if status is not None:
+            status.show("steady-red")
+        raise
     code = setup.get("claimCode")
     device = connect(
         str(setup["provisioningUrl"]),
@@ -662,6 +774,7 @@ def start(  # noqa: PLR0913 -- connect()'s options, by keyword
         broker_host=broker_host,
         broker_port=broker_port,
         keepalive_s=keepalive_s,
+        light=status,
     )
     if code is not None:
         _forget_claim_code(setup_path, setup)

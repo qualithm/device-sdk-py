@@ -31,7 +31,7 @@ On a board running MicroPython 1.29.0:
 ```python
 import mip
 
-mip.install("github:qualithm/device-sdk-py@0.1.0")
+mip.install("github:qualithm/device-sdk-py@0.2.0")
 ```
 
 On CPython:
@@ -52,7 +52,7 @@ the platform gives you when you add a device.
 
    ```bash
    uvx mpremote exec "import network; w = network.WLAN(network.STA_IF); w.active(True); w.connect('<your-ssid>', '<your-password>')"
-   uvx mpremote exec "import mip; mip.install('github:qualithm/device-sdk-py@0.1.0')"
+   uvx mpremote exec "import mip; mip.install('github:qualithm/device-sdk-py@0.2.0')"
    ```
 
 3. Write the setup file the board reads on boot, with your network and claim code filled in:
@@ -87,6 +87,19 @@ claims itself, stores its credential in flash, and removes the spent claim code 
 file; on a later boot it reuses the stored credential. Every minute it sends its uptime, free
 memory, chip temperature, Wi-Fi signal strength and firmware version. `pico.start` declares each of
 these as a sensor, so they appear on a dashboard.
+
+The board's LED shows where it is:
+
+| LED                                  | State                                       |
+| ------------------------------------ | ------------------------------------------- |
+| Slow pulse, one second on, one off   | Joining Wi-Fi and reaching the gateway      |
+| Q in Morse (long, long, short, long) | Just claimed                                |
+| Steady                               | Connected                                   |
+| Fast flash, twice a second           | Needs attention: read the error on the REPL |
+| Off                                  | Not running, or unpowered                   |
+
+Pass `light=None` to leave the LED to your own code. To show your own state later, pass a
+`pico.StatusLight()` as `light` and call its `show()` with one of `ui.LIGHT_STEPS`.
 
 To pass the details in code instead, call `pico.join_wifi(ssid, password)` and then
 `pico.connect(provisioning_url, claim_code=...)`.
