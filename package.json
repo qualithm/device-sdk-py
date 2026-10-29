@@ -1,69 +1,69 @@
 {
-  "version": "0.3.0",
+  "version": "0.3.1",
   "urls": [
     [
       "qualithm_device/__init__.mpy",
-      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.0/qualithm_device.__init__.mpy"
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.1/qualithm_device.__init__.mpy"
     ],
     [
       "qualithm_device/_backoff.mpy",
-      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.0/qualithm_device._backoff.mpy"
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.1/qualithm_device._backoff.mpy"
     ],
     [
       "qualithm_device/_capability.mpy",
-      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.0/qualithm_device._capability.mpy"
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.1/qualithm_device._capability.mpy"
     ],
     [
       "qualithm_device/_credential.mpy",
-      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.0/qualithm_device._credential.mpy"
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.1/qualithm_device._credential.mpy"
     ],
     [
       "qualithm_device/_device.mpy",
-      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.0/qualithm_device._device.mpy"
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.1/qualithm_device._device.mpy"
     ],
     [
       "qualithm_device/_errors.mpy",
-      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.0/qualithm_device._errors.mpy"
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.1/qualithm_device._errors.mpy"
     ],
     [
       "qualithm_device/_micropython.mpy",
-      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.0/qualithm_device._micropython.mpy"
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.1/qualithm_device._micropython.mpy"
     ],
     [
       "qualithm_device/_provision.mpy",
-      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.0/qualithm_device._provision.mpy"
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.1/qualithm_device._provision.mpy"
     ],
     [
       "qualithm_device/_roots.mpy",
-      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.0/qualithm_device._roots.mpy"
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.1/qualithm_device._roots.mpy"
     ],
     [
       "qualithm_device/_subject.mpy",
-      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.0/qualithm_device._subject.mpy"
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.1/qualithm_device._subject.mpy"
     ],
     [
       "qualithm_device/_time.mpy",
-      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.0/qualithm_device._time.mpy"
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.1/qualithm_device._time.mpy"
     ],
     [
       "qualithm_device/board.mpy",
-      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.0/qualithm_device.board.mpy"
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.1/qualithm_device.board.mpy"
     ],
     [
       "qualithm_device/interfaces.mpy",
-      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.0/qualithm_device.interfaces.mpy"
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.1/qualithm_device.interfaces.mpy"
     ],
     [
       "qualithm_device/pico.mpy",
-      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.0/qualithm_device.pico.mpy"
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.1/qualithm_device.pico.mpy"
     ],
     [
       "qualithm_device/ui.mpy",
-      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.0/qualithm_device.ui.mpy"
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.1/qualithm_device.ui.mpy"
     ],
     [
       "qualithm_device/virtual.mpy",
-      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.0/qualithm_device.virtual.mpy"
+      "https://github.com/qualithm/device-sdk-py/releases/download/0.3.1/qualithm_device.virtual.mpy"
     ]
   ],
   "deps": [
