@@ -326,3 +326,85 @@ jobs:
             --verify-tag \
             --title "$TAG" \
             --notes-file /tmp/release-notes.md
+
+  # The pinned Unix port, released for the CLI's virtual devices to download and
+  # check against a pinned SHA-256 (Decision qualithm/pm#2744). Each build runs
+  # the repo's tests before it is attached. No cache: its key doesn't name the OS
+  # release, so a toolchain CI built on a newer runner could be shipped instead.
+  # Linux builds on 22.04 so the binary runs on older glibc; macOS targets 13.
+  unix-port:
+    name: Unix port (${{ matrix.target }})
+    needs: github-release
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-15
+          - target: darwin-x64
+            runner: macos-15-intel
+          - target: linux-x64
+            runner: ubuntu-22.04
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # dx:unix-port-toolchain-begin
+      - name: Build the pinned MicroPython toolchain
+        run: |
+          tc="$HOME/.cache/qualithm/micropython-$MICROPYTHON_VERSION"
+          if [[ -x "$tc/micropython" && -x "$tc/mpy-cross" && -f "$tc/lib/unittest/__main__.py" ]]; then
+            echo "MicroPython $MICROPYTHON_VERSION toolchain is built at $tc"
+            exit 0
+          fi
+          src="$(mktemp -d)"
+          git -c advice.detachedHead=false clone --quiet --depth 1 --branch "v$MICROPYTHON_VERSION" \
+            https://github.com/micropython/micropython "$src"
+          jobs="$(getconf _NPROCESSORS_ONLN)"
+          make -s -C "$src/mpy-cross" -j "$jobs"
+          make -s -C "$src/ports/unix" submodules
+          make -s -C "$src/ports/unix" -j "$jobs" MICROPY_PY_FFI=0
+          stdlib="$src/lib/micropython-lib/python-stdlib"
+          rm -rf "$tc.partial"
+          mkdir -p "$tc.partial/lib/unittest"
+          cp "$src/ports/unix/build-standard/micropython" "$src/mpy-cross/build/mpy-cross" "$tc.partial/"
+          cp "$stdlib/unittest/unittest/__init__.py" "$stdlib/unittest-discover/unittest/__main__.py" \
+            "$tc.partial/lib/unittest/"
+          cp "$stdlib/argparse/argparse.py" "$stdlib/fnmatch/fnmatch.py" "$tc.partial/lib/"
+          rm -rf "$tc" "$src"
+          mv "$tc.partial" "$tc"
+      - name: Check the Unix port and mpy-cross match the pin
+        run: |
+          tc="$HOME/.cache/qualithm/micropython-$MICROPYTHON_VERSION"
+          python3 .github/micropython-package toolchain --micropython "$tc/micropython" --mpy-cross "$tc/mpy-cross"
+      # dx:unix-port-toolchain-end
+      - name: Run the tests on this build
+        run: |
+          tc="$HOME/.cache/qualithm/micropython-$MICROPYTHON_VERSION"
+          MICROPYPATH="tests/fakes:src:$tc/lib:.frozen" "$tc/micropython" -m unittest discover -s tests
+
+      - name: Check this build has sockets and TLS
+        run: |
+          tc="$HOME/.cache/qualithm/micropython-$MICROPYTHON_VERSION"
+          "$tc/micropython" -c "import socket, tls"
+
+      - name: Attach this build to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          tc="$HOME/.cache/qualithm/micropython-$MICROPYTHON_VERSION"
+          asset="micropython-$MICROPYTHON_VERSION-$TARGET"
+          cp "$tc/micropython" "$asset"
+          python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$asset" > "$asset.sha256"
+          gh release upload "$GITHUB_REF_NAME" "$asset" "$asset.sha256" --clobber
