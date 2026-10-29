@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Vendored by dx ci sync from dx's ci-templates/_micropython-package.py. Do not edit — change the source in dx and re-run dx ci sync.
-"""Build and check a MicroPython package's mip release (Decisions qualithm/pm#2254, #2255).
+"""Build and check a MicroPython package's mip release.
 
 package.json is mip's manifest and the version source. Its `urls` name each
 module under src/ as a .mpy, fetched from the release asset of its version, so
