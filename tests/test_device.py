@@ -251,8 +251,41 @@ class DeviceTest(unittest.TestCase):
         )
 
     def test_rejects_an_invalid_command_key(self):
-        with self.assertRaises(TopicError):
+        with self.assertRaises(CapabilityError):
             self.device.on_command("bad key", print)
+
+    def test_skips_a_command_that_does_not_fit_its_declaration(self):
+        self.device.declare_capabilities(
+            [
+                {"key": "p", "type": "onoff"},
+                {"key": "l", "type": "range", "min": 0, "max": 10},
+                {"key": "m", "type": "enum", "options": ["auto", "eco"]},
+                {"key": "r", "type": "trigger"},
+            ]
+        )
+        seen = []
+        for key in ("p", "l", "m", "r"):
+            self.device.on_command(key, lambda value, key=key: seen.append((key, value)))
+        fits = [
+            ("command/p", b'{"value":false}'),
+            ("command/l", b'{"value":10}'),
+            ("command/m", b'{"value":"auto"}'),
+            ("command/r", b"{}"),
+        ]
+        misfits = [
+            ("command/p", b'{"value":1}'),
+            ("command/p", b"{}"),
+            ("command/l", b'{"value":11}'),
+            ("command/l", b'{"value":true}'),
+            ("command/l", b'{"value":"5"}'),
+            ("command/m", b'{"value":"off"}'),
+            ("command/m", b'{"value":1}'),
+            ("command/r", b'{"value":1}'),
+        ]
+        self.session.inbound = fits + misfits
+        rest = self.device.poll()
+        self.assertEqual(seen, [("p", False), ("l", 10), ("m", "auto"), ("r", None)])
+        self.assertEqual(rest, misfits)
 
     def test_a_sensor_takes_no_commands(self):
         with self.assertRaises(CapabilityError):

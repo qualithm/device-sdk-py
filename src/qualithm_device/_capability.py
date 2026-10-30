@@ -16,6 +16,8 @@ TYPE_CHECKING = False
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from qualithm_device._subject import Command
+
 #: Each capability type, and the declaration fields it takes besides `key` and `type`.
 _FIELDS = {
     "onoff": (),
@@ -127,3 +129,44 @@ def build_manifest(declarations: "Sequence[Mapping[str, object]] | None") -> "di
         seen.append(entry["key"])
         capabilities.append(entry)
     return {"capabilities": capabilities}
+
+
+def fits_declaration(entry: "Mapping[str, object]", command: "Command") -> bool:
+    """Whether a decoded command fits the capability as declared, as device-sdk-js checks it.
+
+    The platform checks commands when it queues them, so a misfit arrived out of band.
+
+    Args:
+        entry: The capability's manifest entry, from `build_manifest`.
+        command: The decoded command.
+
+    Returns:
+        True for a trigger with no value, a boolean for `onoff`, a finite number within
+        `min`..`max` for `range`, or a declared option for `enum`; False otherwise, and for a
+        sensor.
+    """
+    kind = entry["type"]
+    if kind == "trigger":
+        return command.trigger
+    if command.trigger:
+        return False
+    config: dict[str, object] = entry["config"]  # pyright: ignore[reportAssignmentType] -- build_manifest's shape
+    return _fits_value(kind, config, command.value)
+
+
+def _fits_value(kind: object, config: "dict[str, object]", value: object) -> bool:
+    if kind == "onoff":
+        return isinstance(value, bool)
+    if kind == "enum":
+        options = config["options"]
+        return isinstance(value, str) and isinstance(options, list) and value in options
+    if kind != "range" or not _is_finite(value):
+        return False
+    low = config["min"]
+    high = config["max"]
+    return (
+        isinstance(value, (int, float))
+        and isinstance(low, (int, float))
+        and isinstance(high, (int, float))
+        and low <= value <= high
+    )
