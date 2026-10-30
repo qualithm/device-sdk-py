@@ -326,9 +326,9 @@ def connect(  # noqa: PLR0913 -- the hero API takes every option by keyword
             `https://api.qualithm.com`.
         transport: The board's HTTPS and MQTT clients.
         store: Where the credential persists.
-        capabilities: What the device can do or report, at least one declaration (Decision
-            qualithm/pm#747), e.g. `[{"key": "temperature", "type": "sensor",
-            "metric": "temperature", "unit": "celsius"}]`. Checked before anything else.
+        capabilities: What the device can do or report, at least one declaration, e.g.
+            `[{"key": "temperature", "type": "sensor", "metric": "temperature",
+            "unit": "celsius"}]`. Checked before anything else.
         crypto: Key generation and signing; needed only for a certificate credential.
         claim_code: The single-use claim code, read only when nothing is stored.
         name: A human-friendly device name set at claim.
