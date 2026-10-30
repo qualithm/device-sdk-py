@@ -1,7 +1,7 @@
 """The roots the Pico adapters trust: the platform's certificate chains end at one of them.
 
 ISRG Root X1 and X2 anchor the gateway's Let's Encrypt chain; GTS Root R1 and R4 anchor the
-provisioning API's Google Trust Services chain (Decision qualithm/pm#2292).
+provisioning API's Google Trust Services chain.
 """
 
 ROOTS = (
