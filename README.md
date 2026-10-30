@@ -31,7 +31,7 @@ On a board running MicroPython 1.29.0:
 ```python
 import mip
 
-mip.install("github:qualithm/device-sdk-py@0.3.1")
+mip.install("github:qualithm/device-sdk-py@0.3.2")
 ```
 
 On CPython:
@@ -52,7 +52,7 @@ the platform gives you when you add a device.
 
    ```bash
    uvx mpremote exec "import network; w = network.WLAN(network.STA_IF); w.active(True); w.connect('<your-ssid>', '<your-password>')"
-   uvx mpremote exec "import mip; mip.install('github:qualithm/device-sdk-py@0.3.1')"
+   uvx mpremote exec "import mip; mip.install('github:qualithm/device-sdk-py@0.3.2')"
    ```
 
 3. Write the setup file the board reads on boot, with your network and claim code filled in:
@@ -118,7 +118,7 @@ code.
 
    ```bash
    brew install micropython
-   micropython -m mip install github:qualithm/device-sdk-py@0.3.1
+   micropython -m mip install github:qualithm/device-sdk-py@0.3.2
    ```
 
 2. Write the setup file in your project's directory, with your claim code filled in:

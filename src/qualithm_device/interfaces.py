@@ -1,4 +1,4 @@
-"""The three interfaces a board's adapters implement (Decisions qualithm/pm#682, #2290).
+"""The three interfaces a board's adapters implement.
 
 They exist for type checkers only: a board has no `typing`, so an adapter imports them under
 `if TYPE_CHECKING:` and implements the methods by name.

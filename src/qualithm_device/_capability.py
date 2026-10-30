@@ -1,4 +1,4 @@
-"""Capability declarations and the manifest every connect publishes (Decision qualithm/pm#747).
+"""Capability declarations and the manifest every connect publishes.
 
 A declaration is a dict, one per capability:
 
@@ -117,9 +117,7 @@ def build_manifest(declarations: "Sequence[Mapping[str, object]] | None") -> "di
         CapabilityError: The list is missing or empty, or a declaration is invalid.
     """
     if not isinstance(declarations, (list, tuple)) or not declarations:
-        raise CapabilityError(
-            "a device must declare at least one capability at connect (Decision qualithm/pm#747)"
-        )
+        raise CapabilityError("a device must declare at least one capability at connect")
     capabilities: list[dict[str, object]] = []
     seen: list[object] = []
     for declaration in declarations:
