@@ -54,5 +54,5 @@ dependency: the core takes none a board can't install.
 ## Generated files
 
 `.github/workflows/ci.yaml` and `.github/micropython-package` are generated from `dx/ci-templates/`;
-change the template and run `dx ci sync` from dx, never edit them here. `CI Required` is the single
-required status check.
+change the template and run `dx ci sync` from dx, never edit them here. `CI Required` and `PR Title`
+are required.
