@@ -3,7 +3,7 @@
 import json
 import time
 
-from qualithm_device._capability import build_manifest
+from qualithm_device._capability import build_manifest, fits_declaration
 from qualithm_device._credential import CERT, Broker, Credential
 from qualithm_device._errors import (
     CapabilityError,
@@ -113,7 +113,7 @@ class Device:
         self._now = now
         self._handlers: dict[str, CommandHandler] = {}
         self._commands_subscribed = False
-        self._sensors = _sensor_keys(manifest)
+        self._declared = _declarations(manifest)
 
     def _open(self) -> "Session":
         if self._session is None:
@@ -185,13 +185,12 @@ class Device:
             handler: Called with the value from `poll()`.
 
         Raises:
-            TopicError: The key is invalid.
-            CapabilityError: The key is a declared sensor, which is read-only.
+            CapabilityError: The key is invalid, or is a declared sensor, which is read-only.
             GatewayError: The device is closed, or the subscribe failed.
         """
         if not is_valid_capability_key(key):
-            raise TopicError(f"invalid capability key: {key}")
-        if key in self._sensors:
+            raise CapabilityError(f"invalid capability key: {key}")
+        if _declared(self._declared, key, "sensor"):
             raise CapabilityError(f"capability {key} is a sensor and takes no commands")
         self._handlers[key] = handler
         if not self._commands_subscribed:
@@ -213,12 +212,13 @@ class Device:
         """
         manifest = build_manifest(capabilities)
         self.publish(MANIFEST_TOPIC, json.dumps(manifest))
-        self._sensors = _sensor_keys(manifest)
+        self._declared = _declarations(manifest)
 
     def poll(self) -> "list[tuple[str, bytes]]":
         """Service the session, run command handlers, and return every other message.
 
-        A command with no handler, or whose payload doesn't decode, comes back with the rest.
+        A command with no handler, whose payload doesn't decode, or whose value doesn't fit the
+        declared capability comes back with the rest; its handler isn't called.
 
         Returns:
             The (topic, payload) pairs received since the last poll that no handler took.
@@ -240,6 +240,10 @@ class Device:
             try:
                 command = decode_command(payload)
             except TopicError:
+                rest.append((topic, payload))
+                continue
+            entry = self._declared.get(key)  # pyright: ignore[reportArgumentType] -- a handler's key is a str
+            if entry is not None and not fits_declaration(entry, command):
                 rest.append((topic, payload))
                 continue
             handler(None if command.trigger else command.value)
@@ -275,10 +279,16 @@ class Device:
             session.close()
 
 
-def _sensor_keys(manifest: "dict[str, object]") -> "list[object]":
-    """The keys of a manifest's sensors, which take no commands."""
+def _declarations(manifest: "dict[str, object]") -> "dict[str, dict[str, object]]":
+    """A manifest's entries by capability key."""
     entries: list[dict[str, object]] = manifest["capabilities"]  # pyright: ignore[reportAssignmentType] -- build_manifest's shape
-    return [entry["key"] for entry in entries if entry["type"] == "sensor"]
+    return {entry["key"]: entry for entry in entries}  # pyright: ignore[reportReturnType] -- keys are str
+
+
+def _declared(declared: "dict[str, dict[str, object]]", key: str, kind: str) -> bool:
+    """Whether `key` is declared with type `kind`."""
+    entry = declared.get(key)
+    return entry is not None and entry["type"] == kind
 
 
 def _try_renew(

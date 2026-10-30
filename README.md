@@ -233,8 +233,10 @@ while True:
         print(topic, payload)
 ```
 
-A handler gets the command's value, or `None` for a trigger. Declare the key as a control first: a
-sensor's key raises `CapabilityError`.
+A handler gets the command's value, or `None` for a trigger. Declare the key as a control first: an
+invalid key or a sensor's key raises `CapabilityError`. A command whose value doesn't fit the
+declaration (out of range, not a declared option, or the wrong type) skips the handler and comes
+back from `poll()` with the other messages.
 
 ### Renewal and reconnecting
 
@@ -248,13 +250,13 @@ Every error subclasses `QualithmDeviceError`:
 
 | Error                  | Raised when                                                            |
 | ---------------------- | ---------------------------------------------------------------------- |
-| `CapabilityError`      | no capability is declared, one is invalid, or a command hits a sensor  |
+| `CapabilityError`      | a capability is missing or invalid, or a command key is invalid or a sensor |
 | `ClaimError`           | the claim endpoint is unreachable or rejects the code                  |
 | `CredentialError`      | nothing is stored and there's no claim code, or the credential expired |
 | `EnrollError`          | certificate enrollment fails                                           |
 | `RenewError`           | renewal fails; kept in `device.renew_error`, never raised by `connect` |
 | `GatewayError`         | no broker is known, or the session is refused or drops                 |
-| `TopicError`           | a topic, capability key, command payload or reading breaks the grammar |
+| `TopicError`           | a topic, command payload or reading breaks the grammar                 |
 | `PayloadTooLargeError` | a payload exceeds the ceiling the gateway advertised                   |
 
 ## API Reference
