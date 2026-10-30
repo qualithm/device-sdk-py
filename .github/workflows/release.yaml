@@ -4,9 +4,8 @@
 name: Release
 
 # A MicroPython package releases as a GitHub Release of .mpy files plus mip's
-# package.json (Decisions qualithm/pm#1506, #2254). The tree's package.json at
-# the tag names those assets, so a board installs the release with
-# mip.install("github:<owner>/<repo>@<tag>"). Nothing is published elsewhere.
+# package.json. The tree's package.json at the tag names those assets, so a
+# board installs the release with mip.install("github:<owner>/<repo>@<tag>"). Nothing is published elsewhere.
 
 on:
   push:
@@ -328,9 +327,9 @@ jobs:
             --notes-file /tmp/release-notes.md
 
   # The pinned Unix port, released for the CLI's virtual devices to download and
-  # check against a pinned SHA-256 (Decision qualithm/pm#2744). Each build runs
-  # the repo's tests before it is attached. No cache: its key doesn't name the OS
-  # release, so a toolchain CI built on a newer runner could be shipped instead.
+  # check against a pinned SHA-256. Each build runs the repo's tests before it is
+  # attached. No cache: its key doesn't name the OS release, so a toolchain CI
+  # built on a newer runner could be shipped instead.
   # Linux builds on 22.04 so the binary runs on older glibc; macOS targets 13.
   unix-port:
     name: Unix port (${{ matrix.target }})
