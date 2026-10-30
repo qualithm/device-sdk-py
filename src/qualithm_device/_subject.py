@@ -86,7 +86,7 @@ def command_key(topic: str) -> "str | None":
 
 
 class Command:
-    """A decoded command (Decision qualithm/pm#747): a value to set, or a trigger.
+    """A decoded command: a value to set, or a trigger.
 
     Attributes:
         trigger: True for a trigger, which carries no value.

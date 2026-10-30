@@ -1,4 +1,4 @@
-"""Adapters for a Raspberry Pi Pico 2 W or Pico W on MicroPython (Decisions qualithm/pm#2292, 2293).
+"""Adapters for a Raspberry Pi Pico 2 W or Pico W on MicroPython.
 
 `start()` reads the setup file `qualithm deploy` writes, joins Wi-Fi and connects, declaring
 `system_info`'s sensors:
@@ -10,9 +10,9 @@
 
 `join_wifi()` and `connect()` do the same steps with the details passed in.
 
-The board's LED shows where it is (Decision qualithm/pm#2727): a slow pulse while it joins Wi-Fi
-and reaches the gateway, Q once after a claim, steady once connected, and a fast flash when it needs
-attention. Pass `light=None` to leave the LED alone, or a `StatusLight` to keep showing states:
+The board's LED shows where it is: a slow pulse while it joins Wi-Fi and reaches the gateway, Q
+once after a claim, steady once connected, and a fast flash when it needs attention. Pass
+`light=None` to leave the LED alone, or a `StatusLight` to keep showing states:
 
     light = pico.StatusLight()
     device = pico.start(light=light)
