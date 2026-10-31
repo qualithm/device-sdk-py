@@ -1,7 +1,7 @@
 [project]
 name = "qualithm-device"
 # 0.0.0 marks the package unreleased; package.json carries the same version.
-version = "0.3.2"
+version = "0.4.0"
 description = "Device SDK for MicroPython and Python devices connecting to Qualithm."
 readme = "README.md"
 license = "Apache-2.0"
@@ -61,6 +61,8 @@ convention = "google"
 "examples/**" = ["T20"]
 
 [tool.pyright]
+# A deprecated API use is an error everywhere, not only under strict.
+reportDeprecated = "error"
 include = ["src", "tests", "examples"]
 strict = ["src"]
 pythonVersion = "3.11"
