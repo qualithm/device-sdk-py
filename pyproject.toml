@@ -61,6 +61,8 @@ convention = "google"
 "examples/**" = ["T20"]
 
 [tool.pyright]
+# A deprecated API use is an error everywhere, not only under strict.
+reportDeprecated = "error"
 include = ["src", "tests", "examples"]
 strict = ["src"]
 pythonVersion = "3.11"
