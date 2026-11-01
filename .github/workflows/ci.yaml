@@ -96,6 +96,17 @@ jobs:
             fi
           done
           echo "reuse=false" >> "$GITHUB_OUTPUT"
+      # Every image reference in the repo must match the vendored dx registry.
+      # Here so it runs on every event, docs included (a README can carry an
+      # image reference too) without a job of its own (qualithm/pm#3010). A
+      # repo with no vendored registry references no container image and skips.
+      - name: Check image pins against the vendored dx registry
+        run: |
+          if [ ! -f .github/images/images.config ]; then
+            echo "no vendored registry: repo references no container image; skipping"
+            exit 0
+          fi
+          .github/images/images check --config .github/images/images.config .
 
   lint:
     name: Lint
@@ -265,24 +276,6 @@ jobs:
           for init in src/*/__init__.py; do packages+=("$(basename "$(dirname "$init")")"); done
           uv run --no-sync --with pdoc==16.0.0 python -W error -m pdoc -o "$RUNNER_TEMP/docs" "${packages[@]}"
 
-  image-pins:
-    name: Image Pins
-    # Every image reference in the repo must match the vendored dx registry.
-    # Runs on every PR, docs included: a README can carry an image reference
-    # too. A repo with no vendored registry references no container image and
-    # skips.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Check image pins against the vendored dx registry
-        run: |
-          if [ ! -f .github/images/images.config ]; then
-            echo "no vendored registry: repo references no container image; skipping"
-            exit 0
-          fi
-          .github/images/images check --config .github/images/images.config .
-
   # The python-lib variant's runtime job (see bun-lib-mqtt.yaml): the shared
   # core's tests on MicroPython's Unix port, and its .mpy compile check.
   # dx:micropython-job-begin
@@ -343,8 +336,8 @@ jobs:
   # dx:micropython-job-end
   ci-required:
     name: CI Required
-    if: always()
-    needs: [changes, lint, typecheck, test, build, coverage, micropython, docs, image-pins]
+    if: failure() || cancelled()
+    needs: [changes, lint, typecheck, test, build, coverage, micropython, docs]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
