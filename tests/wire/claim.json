@@ -7,9 +7,9 @@
       "status": 200,
       "body": {
         "success": true,
-        "data": { "deviceId": "d", "spaceId": "s", "teamId": "t", "secret": "qmd_abc" }
+        "data": { "deviceId": "d", "scopeId": "s", "teamId": "t", "secret": "qmd_abc" }
       },
-      "credential": { "deviceId": "d", "teamId": "t", "spaceId": "s", "kind": "token", "token": "qmd_abc" }
+      "credential": { "deviceId": "d", "teamId": "t", "scopeId": "s", "kind": "token", "token": "qmd_abc" }
     },
     {
       "description": "the broker the platform returns for the device's zone is kept",
@@ -17,7 +17,7 @@
       "body": {
         "data": {
           "deviceId": "d",
-          "spaceId": "s",
+          "scopeId": "s",
           "teamId": "t",
           "secret": "qmd_abc",
           "broker": { "host": "gw.test-sg-sin-a.qualithm.com", "port": 8883 }
@@ -26,7 +26,7 @@
       "credential": {
         "deviceId": "d",
         "teamId": "t",
-        "spaceId": "s",
+        "scopeId": "s",
         "kind": "token",
         "token": "qmd_abc",
         "broker": { "host": "gw.test-sg-sin-a.qualithm.com", "port": 8883 }
@@ -38,7 +38,7 @@
       "body": {
         "data": {
           "deviceId": "d",
-          "spaceId": "s",
+          "scopeId": "s",
           "teamId": "t",
           "secret": "qmd_abc",
           "credential": { "kind": "token", "expiresAt": "2027-01-01T00:00:00.000Z" }
@@ -47,7 +47,7 @@
       "credential": {
         "deviceId": "d",
         "teamId": "t",
-        "spaceId": "s",
+        "scopeId": "s",
         "kind": "token",
         "token": "qmd_abc",
         "expiresAt": "2027-01-01T00:00:00.000Z"
