@@ -3,9 +3,18 @@
 
 name: Security Audit
 
+# Advisory scans run daily; every job runs on Mondays and on a push that
+# changes a dependency (qualithm/pm#3067).
 on:
   schedule:
-    - cron: "0 6 * * *" # Daily at 06:00 UTC
+    - cron: "0 6 * * 0,2-6" # Daily at 06:00 UTC, except Monday
+    - cron: "0 6 * * 1" # Monday at 06:00 UTC: every job
+  push:
+    branches: [development, main]
+    paths:
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/audit.yaml"
   workflow_dispatch: {}
 
 permissions:
