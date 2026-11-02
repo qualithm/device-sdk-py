@@ -3,7 +3,7 @@
   "claimed": {
     "deviceId": "d",
     "teamId": "t",
-    "spaceId": "s",
+    "scopeId": "s",
     "kind": "token",
     "token": "qmd_abc",
     "issuedAt": "2026-01-01T00:00:00.000Z",

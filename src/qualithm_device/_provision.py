@@ -111,7 +111,7 @@ def claim(  # noqa: PLR0913 -- the request's fields, plus the injected transport
     return Credential(
         device_id=_field(data, "deviceId", ClaimError),
         team_id=_field(data, "teamId", ClaimError),
-        space_id=_field(data, "spaceId", ClaimError),
+        scope_id=_field(data, "scopeId", ClaimError),
         kind=kind,
         token=_field(data, "secret", ClaimError),
         issued_at=format_iso(now),
@@ -163,7 +163,7 @@ def enroll_certificate(  # noqa: PLR0913 -- the request, plus the injected trans
     return Credential(
         device_id=credential.device_id,
         team_id=credential.team_id,
-        space_id=credential.space_id,
+        scope_id=credential.scope_id,
         kind=CERT,
         private_key_pem=private_key_pem,
         certificate_pem=_field(data, "certificatePem", EnrollError),
@@ -223,7 +223,7 @@ def renew(
         return Credential(
             device_id=credential.device_id,
             team_id=credential.team_id,
-            space_id=credential.space_id,
+            scope_id=credential.scope_id,
             kind=TOKEN,
             token=_field(data, "secret", RenewError),
             issued_at=format_iso(now),
@@ -245,7 +245,7 @@ def renew(
     return Credential(
         device_id=credential.device_id,
         team_id=credential.team_id,
-        space_id=credential.space_id,
+        scope_id=credential.scope_id,
         kind=CERT,
         private_key_pem=private_key_pem,
         certificate_pem=_field(data, "certificatePem", RenewError),

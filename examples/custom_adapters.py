@@ -40,7 +40,7 @@ class ScriptedTransport:
         data = {
             "deviceId": "11111111-1111-1111-1111-111111111111",
             "teamId": "team-1",
-            "spaceId": "space-1",
+            "scopeId": "scope-1",
             "secret": "qmd_example",
             "broker": {"host": "gw.example.com", "port": 8883},
         }

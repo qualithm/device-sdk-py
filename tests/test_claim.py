@@ -54,7 +54,7 @@ class ClaimTest(unittest.TestCase):
         self.assertIsNone(caught.exception.status)
 
     def test_rejects_a_response_missing_the_secret(self):
-        body = {"data": {"deviceId": "d", "spaceId": "s", "teamId": "t"}}
+        body = {"data": {"deviceId": "d", "scopeId": "s", "teamId": "t"}}
         transport = FakeTransport({"/v1/provision/claim": Response(200, body)})
         with self.assertRaises(ClaimError):
             claim(transport, "https://api.example.com", "qmc_x.y", JAN_1_2026)

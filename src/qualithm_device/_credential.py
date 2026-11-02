@@ -79,7 +79,7 @@ class Credential:
         self,
         device_id: str,
         team_id: str,
-        space_id: str,
+        scope_id: str,
         kind: str,
         issued_at: str,
         *,
@@ -93,7 +93,7 @@ class Credential:
         """Hold the credential's fields."""
         self.device_id = device_id
         self.team_id = team_id
-        self.space_id = space_id
+        self.scope_id = scope_id
         self.kind = kind
         self.issued_at = issued_at
         self.token = token
@@ -108,7 +108,7 @@ class Credential:
         data: dict[str, object] = {
             "deviceId": self.device_id,
             "teamId": self.team_id,
-            "spaceId": self.space_id,
+            "scopeId": self.scope_id,
             "kind": self.kind,
             "issuedAt": self.issued_at,
         }
@@ -143,7 +143,7 @@ class Credential:
         credential = cls(
             device_id=_string(data, "deviceId") or "",
             team_id=_string(data, "teamId") or "",
-            space_id=_string(data, "spaceId") or "",
+            scope_id=_string(data, "scopeId") or "",
             kind=kind,
             issued_at=_string(data, "issuedAt") or "",
             token=_string(data, "token", required=False),
