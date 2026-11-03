@@ -433,7 +433,7 @@ jobs:
   micropython:
     name: Test (MicroPython Unix port)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.reuse != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
