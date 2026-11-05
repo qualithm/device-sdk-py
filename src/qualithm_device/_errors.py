@@ -75,3 +75,20 @@ class PayloadTooLargeError(QualithmDeviceError):
         )
         self.max_bytes = max_bytes
         self.actual_bytes = actual_bytes
+
+
+class TooManyMetricsError(QualithmDeviceError):
+    """A reading carries more metrics than one event holds.
+
+    Attributes:
+        max_metrics: The most metrics one reading may carry.
+        actual_metrics: How many the refused reading carried.
+    """
+
+    def __init__(self, max_metrics: int, actual_metrics: int) -> None:
+        """Record both counts."""
+        super().__init__(
+            f"reading of {actual_metrics} metrics exceeds the {max_metrics}-metric limit"
+        )
+        self.max_metrics = max_metrics
+        self.actual_metrics = actual_metrics

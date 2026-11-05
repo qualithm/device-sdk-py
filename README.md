@@ -258,6 +258,7 @@ Every error subclasses `QualithmDeviceError`:
 | `GatewayError`         | no broker is known, or the session is refused or drops                 |
 | `TopicError`           | a topic, command payload or reading breaks the grammar                 |
 | `PayloadTooLargeError` | a payload exceeds the ceiling the gateway advertised                   |
+| `TooManyMetricsError`  | a reading carries more than 64 metrics, the most one event holds      |
 
 ## API Reference
 

@@ -12,6 +12,7 @@ from qualithm_device._errors import (
     PayloadTooLargeError,
     QualithmDeviceError,
     RenewError,
+    TooManyMetricsError,
     TopicError,
 )
 from qualithm_device._provision import claim, renew
@@ -28,6 +29,9 @@ from qualithm_device._subject import (
 )
 
 TYPE_CHECKING = False
+
+MAX_METRICS = 64
+"""The most metrics one reading may carry: one event holds up to this many."""
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
@@ -152,9 +156,12 @@ class Device:
 
         Raises:
             TopicError: There are no metrics, or a value isn't a number.
+            TooManyMetricsError: The reading carries more than 64 metrics.
             PayloadTooLargeError: The reading exceeds the gateway's ceiling.
             GatewayError: The device is closed, or the publish failed.
         """
+        if len(metrics) > MAX_METRICS:
+            raise TooManyMetricsError(MAX_METRICS, len(metrics))
         when = int(self._now() * 1000) if ts_ms is None else ts_ms
         self.publish(TELEMETRY_TOPIC, telemetry_payload(metrics, when))
 
