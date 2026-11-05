@@ -17,6 +17,7 @@ from qualithm_device._errors import (
     PayloadTooLargeError,
     QualithmDeviceError,
     RenewError,
+    TooManyMetricsError,
     TopicError,
 )
 from qualithm_device._provision import claim, enroll_certificate, renew, renew_proof
@@ -52,6 +53,7 @@ __all__ = [
     "PayloadTooLargeError",
     "QualithmDeviceError",
     "RenewError",
+    "TooManyMetricsError",
     "TopicError",
     "check_publish_topic",
     "check_topic_filter",
