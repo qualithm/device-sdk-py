@@ -9,6 +9,7 @@ from qualithm_device import (
     CredentialError,
     GatewayError,
     PayloadTooLargeError,
+    TooManyMetricsError,
     TopicError,
     renew_due,
     resolve_broker,
@@ -224,6 +225,21 @@ class DeviceTest(unittest.TestCase):
         with self.assertRaises(PayloadTooLargeError) as caught:
             self.device.publish("telemetry", b"x" * 257)
         self.assertEqual((caught.exception.max_bytes, caught.exception.actual_bytes), (256, 257))
+
+    def test_refuses_a_reading_over_64_metrics_before_sending(self):
+        # Its own device: 64 metrics outgrow the 256-byte ceiling set up above.
+        transport = claimed_transport()
+        device = connect(URL, transport, MemoryStore(), claim_code="qmc_x.y", now=clock(JAN_1_2026))
+        session = transport.sessions[0]
+        session.published = []
+        with self.assertRaises(TooManyMetricsError) as caught:
+            device.publish_reading({"m" + str(i): i for i in range(65)})
+        self.assertEqual((caught.exception.max_metrics, caught.exception.actual_metrics), (64, 65))
+        self.assertEqual(session.published, [])
+        device.publish_reading({"m" + str(i): i for i in range(64)})
+        topic, payload = session.published[0]
+        self.assertEqual(topic, "telemetry")
+        self.assertEqual(len(json.loads(payload.decode())["metrics"]), 64)
 
     def test_checks_topics_before_sending(self):
         with self.assertRaises(TopicError):
