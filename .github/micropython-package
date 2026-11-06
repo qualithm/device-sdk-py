@@ -25,8 +25,10 @@ Usage:
       MICROPYTHON_VERSION.
 
 package.json may carry `exclude`, src-relative globs of host-only modules the
-manifest leaves out (a dual-runtime package's CPython adapters), and mip's own
-`deps`. Exits 1 with the reason on stderr.
+manifest leaves out (a dual-runtime package's CPython adapters), mip's own
+`deps`, and `depModules`, the top-level modules a `github:` dep installs: its
+import name isn't its mip name, and mip reads each dep as exactly a name and a
+version. Exits 1 with the reason on stderr.
 """
 
 import argparse
@@ -206,6 +208,10 @@ def command_subset(root, _args):
     modules = shipped(root, manifest)
     own = {module.split("/")[0].removesuffix(".py") for module in modules}
     deps = {dep[0] for dep in manifest.get("deps", []) if isinstance(dep, list) and dep and isinstance(dep[0], str)}
+    dep_modules = manifest.get("depModules", [])
+    if not isinstance(dep_modules, list) or not all(isinstance(name, str) and name for name in dep_modules):
+        raise PackageError(f"{MANIFEST}: depModules must be a list of module names")
+    deps |= set(dep_modules)
     allowed = board_modules() | CORE
     problems = []
     for module in modules:
