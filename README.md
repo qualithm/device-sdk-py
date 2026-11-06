@@ -173,6 +173,9 @@ device.publish_reading({"temperature": 21.4})
 
 `transport` and `store` are the board's adapters, described under Usage.
 
+`publish_reading` sends to `telemetry`. `device.publish(topic, payload)` takes only the topics the
+gateway accepts, `telemetry` or a `command/<key>` response, and raises `TopicError` for any other.
+
 ## Usage
 
 ### Adapters
