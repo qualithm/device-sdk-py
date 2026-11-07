@@ -9,7 +9,13 @@
         "success": true,
         "data": { "deviceId": "d", "scopeId": "s", "teamId": "t", "secret": "qmd_abc" }
       },
-      "credential": { "deviceId": "d", "teamId": "t", "scopeId": "s", "kind": "token", "token": "qmd_abc" }
+      "credential": {
+        "deviceId": "d",
+        "teamId": "t",
+        "scopeId": "s",
+        "kind": "token",
+        "token": "qmd_abc"
+      }
     },
     {
       "description": "the broker the platform returns for the device's zone is kept",
@@ -55,7 +61,17 @@
     }
   ],
   "errors": [
-    { "description": "a rejected code", "status": 401, "body": { "message": "nope" }, "message": "nope" },
-    { "description": "a body that isn't JSON", "status": 500, "raw": "not json", "message": "claim failed with status 500" }
+    {
+      "description": "a rejected code",
+      "status": 401,
+      "body": { "message": "nope" },
+      "message": "nope"
+    },
+    {
+      "description": "a body that isn't JSON",
+      "status": 500,
+      "raw": "not json",
+      "message": "claim failed with status 500"
+    }
   ]
 }

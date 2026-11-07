@@ -31,7 +31,17 @@
     }
   ],
   "errors": [
-    { "description": "a rejected CSR", "status": 400, "body": { "message": "bad csr" }, "message": "bad csr" },
-    { "description": "a body that isn't JSON", "status": 500, "raw": "not json", "message": "enrollment failed with status 500" }
+    {
+      "description": "a rejected CSR",
+      "status": 400,
+      "body": { "message": "bad csr" },
+      "message": "bad csr"
+    },
+    {
+      "description": "a body that isn't JSON",
+      "status": 500,
+      "raw": "not json",
+      "message": "enrollment failed with status 500"
+    }
   ]
 }
