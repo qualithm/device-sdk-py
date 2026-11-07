@@ -10,22 +10,35 @@
   "manifest": {
     "capabilities": [
       { "key": "power", "type": "onoff", "config": {} },
-      { "key": "brightness", "type": "range", "config": { "min": 0, "max": 100, "step": 1, "unit": "percent" } },
+      {
+        "key": "brightness",
+        "type": "range",
+        "config": { "min": 0, "max": 100, "step": 1, "unit": "percent" }
+      },
       { "key": "mode", "type": "enum", "config": { "options": ["auto", "manual"] } },
       { "key": "reboot", "type": "trigger", "config": {} },
-      { "key": "temperature", "type": "sensor", "config": { "metric": "temperature_c", "unit": "celsius" } }
+      {
+        "key": "temperature",
+        "type": "sensor",
+        "config": { "metric": "temperature_c", "unit": "celsius" }
+      }
     ]
   },
   "optionalOmitted": {
     "declarations": [{ "key": "brightness", "type": "range", "min": 0, "max": 1 }],
-    "manifest": { "capabilities": [{ "key": "brightness", "type": "range", "config": { "min": 0, "max": 1 } }] }
+    "manifest": {
+      "capabilities": [{ "key": "brightness", "type": "range", "config": { "min": 0, "max": 1 } }]
+    }
   },
   "invalid": [
     [],
     [{ "key": "bad key", "type": "onoff" }],
     [{ "key": "", "type": "onoff" }],
     [{ "type": "onoff" }],
-    [{ "key": "power", "type": "onoff" }, { "key": "power", "type": "trigger" }],
+    [
+      { "key": "power", "type": "onoff" },
+      { "key": "power", "type": "trigger" }
+    ],
     [{ "key": "x", "type": "dimmer" }],
     [{ "key": "r", "type": "range", "min": 5, "max": 5 }],
     [{ "key": "r", "type": "range", "min": 0, "max": 1, "step": 0 }],
