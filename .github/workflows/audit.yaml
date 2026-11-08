@@ -50,10 +50,13 @@ jobs:
           enable-cache: false
       # Audits exactly what uv.lock pins, every dependency group included,
       # hashed so pip-audit checks the lock without resolving anything itself.
+      # A git requirement can't carry a hash, so it is left out: it is
+      # first-party with no PyPI advisories, and its own dependencies stay in.
       - name: Export the locked dependencies
-        run:
-          uv export --locked --all-groups --no-emit-project --format requirements-txt -o
-          "$RUNNER_TEMP/requirements.txt"
+        run: |
+          uv export --locked --all-groups --no-emit-project --format requirements-txt \
+            -o "$RUNNER_TEMP/requirements.txt"
+          sed -i '/ @ git+/d' "$RUNNER_TEMP/requirements.txt"
       - name: Run pip-audit
         id: scan
         continue-on-error: true
