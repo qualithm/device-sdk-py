@@ -215,11 +215,16 @@ class DeviceTest(unittest.TestCase):
         self.session.published = []
 
     def test_publishes_text_and_bytes(self):
-        self.device.publish("events/door", "open")
-        self.device.publish("events/door", b"shut")
+        self.device.publish("command/door", "open")
+        self.device.publish("command/door", b"shut")
         self.assertEqual(
-            self.session.published, [("events/door", b"open"), ("events/door", b"shut")]
+            self.session.published, [("command/door", b"open"), ("command/door", b"shut")]
         )
+
+    def test_refuses_a_topic_outside_the_contract_before_sending(self):
+        with self.assertRaises(TopicError):
+            self.device.publish("events/door", b"open")
+        self.assertEqual(self.session.published, [])
 
     def test_refuses_a_payload_over_the_gateway_ceiling(self):
         with self.assertRaises(PayloadTooLargeError) as caught:
@@ -329,7 +334,7 @@ class DeviceTest(unittest.TestCase):
     def test_reports_a_dropped_session(self):
         self.session.fail = True
         for call in (
-            lambda: self.device.publish("t", b""),
+            lambda: self.device.publish("telemetry", b""),
             lambda: self.device.subscribe("t"),
             self.device.poll,
         ):

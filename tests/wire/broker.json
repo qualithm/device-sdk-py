@@ -1,6 +1,11 @@
 {
   "source": "device-sdk-js src/__tests__/unit/claim.test.ts (parseBroker)",
-  "valid": [{ "value": { "host": "gw.example.com", "port": 8883 }, "broker": { "host": "gw.example.com", "port": 8883 } }],
+  "valid": [
+    {
+      "value": { "host": "gw.example.com", "port": 8883 },
+      "broker": { "host": "gw.example.com", "port": 8883 }
+    }
+  ],
   "invalid": [
     null,
     "gw.example.com",

@@ -43,7 +43,7 @@ class CommandTest(unittest.TestCase):
 
 class TopicTest(unittest.TestCase):
     def test_accepts_device_relative_topics(self):
-        for topic in ("telemetry", "capabilities", "events/door"):
+        for topic in ("telemetry", "capabilities", "command/power", "command/fan-1"):
             check_publish_topic(topic)
         for topic_filter in ("command/#", "events/+/open", "#"):
             check_topic_filter(topic_filter)
@@ -55,6 +55,12 @@ class TopicTest(unittest.TestCase):
         for topic_filter in ("a/#/b", "a/b#", "a/+b", "a//#"):
             with self.assertRaises(TopicError):
                 check_topic_filter(topic_filter)
+
+    def test_rejects_topics_outside_the_contract(self):
+        for topic in ("events/door", "telemetry/temperature", "command/a/b", "status"):
+            with self.assertRaises(TopicError) as caught:
+                check_publish_topic(topic)
+            self.assertIn("publish readings to telemetry", str(caught.exception))
 
 
 class TelemetryTest(unittest.TestCase):

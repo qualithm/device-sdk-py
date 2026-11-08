@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/qualithm/device-sdk-py/actions/workflows/ci.yaml/badge.svg)](https://github.com/qualithm/device-sdk-py/actions/workflows/ci.yaml)
 [![codecov](https://codecov.io/gh/qualithm/device-sdk-py/graph/badge.svg)](https://codecov.io/gh/qualithm/device-sdk-py)
-[![PyPI](https://img.shields.io/pypi/v/qualithm-device)](https://pypi.org/project/qualithm-device/)
+[![Release](https://img.shields.io/github/v/release/qualithm/device-sdk-py?display_name=tag&sort=semver)](https://github.com/qualithm/device-sdk-py/releases/latest)
 
 Device SDK for MicroPython and Python devices connecting to Qualithm. One `connect()` call claims
 the device once, stores its credential, renews it before it expires, opens its gateway session, and
@@ -172,6 +172,9 @@ device.publish_reading({"temperature": 21.4})
 ```
 
 `transport` and `store` are the board's adapters, described under Usage.
+
+`publish_reading` sends to `telemetry`. `device.publish(topic, payload)` takes only the topics the
+gateway accepts, `telemetry` or a `command/<key>` response, and raises `TopicError` for any other.
 
 ## Usage
 

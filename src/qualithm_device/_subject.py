@@ -40,17 +40,27 @@ def _levels(topic: str) -> "list[str]":
 
 
 def check_publish_topic(topic: str) -> None:
-    """Fail unless a topic can be published to: relative, no empty level, no wildcard.
+    """Fail unless the gateway accepts a publish on a topic.
+
+    It accepts `telemetry`, `capabilities` and a `command/<key>` response.
 
     Args:
         topic: The device-relative topic.
 
     Raises:
-        TopicError: The topic breaks the grammar.
+        TopicError: The topic breaks the grammar, or the gateway accepts no publish on it.
     """
     for level in _levels(topic):
         if "+" in level or "#" in level:
             raise TopicError(f"a publish topic can't hold a wildcard: {topic!r}")
+    if topic in (TELEMETRY_TOPIC, MANIFEST_TOPIC):
+        return
+    if topic.startswith(COMMAND_PREFIX) and is_valid_capability_key(topic[len(COMMAND_PREFIX) :]):
+        return
+    raise TopicError(
+        f"the gateway accepts no publish on {topic!r}: "
+        "publish readings to telemetry, or a command response to command/<key>"
+    )
 
 
 def check_topic_filter(topic_filter: str) -> None:
