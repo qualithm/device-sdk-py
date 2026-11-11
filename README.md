@@ -21,8 +21,8 @@ declares what the device can do.
   checked before they go on the wire.
 - **Board-agnostic.** The core runs on MicroPython and CPython. It reaches the network, crypto and
   storage only through three small adapters the board supplies.
-- **Pico 2 W adapters included.** `qualithm_device.pico` joins Wi-Fi, verifies every TLS
-  certificate, and stores the credential in flash.
+- **Pico 2 W and ESP32 adapters included.** `qualithm_device.pico` and `qualithm_device.esp32` join
+  Wi-Fi, verify every TLS certificate, and store the credential in flash.
 
 ## Installation
 
@@ -108,6 +108,54 @@ To pass the details in code instead, call `pico.join_wifi(ssid, password)` and t
 dates. A Pico connects with a token credential: it has no on-board key generation for a
 certificate.
 
+## Run it on an ESP32
+
+You need an ESP32-S3, ESP32-C3 or ESP32-C6 board, a USB cable, a 2.4 GHz Wi-Fi network, and a
+claim code. The reference boards are the M5Stack AtomS3 Lite (S3), Stamp C3 (C3) and NanoC6 (C6).
+
+1. Download MicroPython 1.29.0 for your chip:
+   [ESP32_GENERIC_S3](https://micropython.org/download/ESP32_GENERIC_S3/),
+   [ESP32_GENERIC_C3](https://micropython.org/download/ESP32_GENERIC_C3/) or
+   [ESP32_GENERIC_C6](https://micropython.org/download/ESP32_GENERIC_C6/). Flash it with
+   [esptool](https://docs.espressif.com/projects/esptool/), naming the chip (`esp32s3`, `esp32c3`
+   or `esp32c6`) and the `.bin` you downloaded:
+
+   ```bash
+   uvx esptool --chip <your-chip> erase-flash
+   uvx esptool --chip <your-chip> write-flash 0 <your-firmware>.bin
+   ```
+
+   If esptool can't connect, hold the board's boot button while you plug it in, then run it again.
+
+2. Join Wi-Fi, install the SDK and write the setup file, as steps 2 and 3 of the Pico 2 W guide
+   do.
+
+3. Save this as `main.py`, copy it to the board and reset it:
+
+   ```python
+   import time
+
+   from qualithm_device import esp32
+
+   device = esp32.start()
+   while True:
+       device.publish_reading(esp32.system_info())
+       device.poll()
+       device.renew_if_due()
+       time.sleep(60)
+   ```
+
+   ```bash
+   uvx mpremote cp main.py :main.py + reset
+   ```
+
+`esp32.start` reads the same setup file and sends the same readings as `pico.start`. It joins WPA2
+and WPA3 Personal networks. It leaves the board's LEDs alone: pass a `pico.StatusLight` on a
+single-colour LED's pin as `light` to show the states in the Pico 2 W's table.
+
+`from qualithm_device import board` picks `pico`, `esp32` or `virtual` for wherever the code runs,
+so one `main.py` runs on each.
+
 ## Run it as a virtual device
 
 A virtual device runs your project on MicroPython's Unix port on your computer, with no board. It
@@ -148,8 +196,9 @@ code.
    micropython main.py
    ```
 
-`board.start` uses the `pico` adapters on a Pico and the `virtual` adapters anywhere else. The
-virtual device tells the platform it is virtual when it claims. It stores its credential in
+`board.start` uses the `pico` adapters on a Pico, the `esp32` adapters on an ESP32 and the
+`virtual` adapters anywhere else. The virtual device tells the platform it is virtual when it
+claims. It stores its credential in
 `qualithm-credential.json`, next to the setup file. Anyone who can read that directory can read
 the credential. Every minute it sends its uptime, free memory, firmware version and a stand-in chip
 temperature that swings around 25 °C.
@@ -191,6 +240,7 @@ The core holds the protocol; the board supplies three adapters, typed in
 
 `qualithm_device.pico` holds the Pico 2 W and Pico W adapters: `Transport`, `FlashStore`,
 `join_wifi` and `system_info`, and `connect`, which uses them and declares `system_info`'s sensors.
+`qualithm_device.esp32` holds the same for an ESP32-S3, C3 or C6.
 
 `transport.open` returns a session with `publish`, `subscribe`, `poll`, `close` and
 `max_packet_size`. `crypto` is needed only for a certificate credential.

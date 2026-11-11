@@ -1,4 +1,4 @@
-"""The three interfaces a board's adapters implement.
+"""The interfaces a board's adapters implement.
 
 They exist for type checkers only: a board has no `typing`, so an adapter imports them under
 `if TYPE_CHECKING:` and implements the methods by name.
@@ -77,4 +77,11 @@ if TYPE_CHECKING:
 
         def clear(self) -> None:
             """Remove the stored credential."""
+            ...
+
+    class Light(Protocol):
+        """A status light a board's adapters show the device light states on."""
+
+        def show(self, state: str) -> None:
+            """Play a state of `ui.LIGHT_STEPS` from its start."""
             ...
