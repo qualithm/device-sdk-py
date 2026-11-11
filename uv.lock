@@ -135,6 +135,18 @@ wheels = [
 ]
 
 [[package]]
+name = "micropython-esp32-esp32-generic-s3-stubs"
+version = "1.29.0.post1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "micropython-stdlib-stubs" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e1/ea/a5f13a3d35043650f50de4906399ee53d44cde774b6f5864258cccf3efef/micropython_esp32_esp32_generic_s3_stubs-1.29.0.post1.tar.gz", hash = "sha256:f92461361481ad1e3b7d487d56513cc56d0bf28fea1441c779082d8c3a1513d0", size = 109520, upload-time = "2026-08-30T14:52:06.487Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/17/d7/9fd7aca73f6b965e226afdb4758861eb539cdb9035b8b67dc307f6508fbd/micropython_esp32_esp32_generic_s3_stubs-1.29.0.post1-py2.py3-none-any.whl", hash = "sha256:83f8e8acbc7730585b8bc3761af09c4d140fcccc83821eb74754e059fc3e33c9", size = 138480, upload-time = "2026-08-30T14:52:05.445Z" },
+]
+
+[[package]]
 name = "micropython-rp2-rpi-pico2-w-stubs"
 version = "1.29.0.post1"
 source = { registry = "https://pypi.org/simple" }
@@ -221,12 +233,13 @@ wheels = [
 
 [[package]]
 name = "qualithm-device"
-version = "0.7.0"
+version = "0.8.0"
 source = { editable = "." }
 
 [package.dev-dependencies]
 dev = [
     { name = "coverage" },
+    { name = "micropython-esp32-esp32-generic-s3-stubs" },
     { name = "micropython-rp2-rpi-pico2-w-stubs" },
     { name = "pyright" },
     { name = "pytest" },
@@ -238,6 +251,7 @@ dev = [
 [package.metadata.requires-dev]
 dev = [
     { name = "coverage", specifier = ">=7.16.2" },
+    { name = "micropython-esp32-esp32-generic-s3-stubs", specifier = "==1.29.0.post1" },
     { name = "micropython-rp2-rpi-pico2-w-stubs", specifier = "==1.29.0.post1" },
     { name = "pyright", specifier = ">=1.1.414" },
     { name = "pytest", specifier = ">=9.1.1" },

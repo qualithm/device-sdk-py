@@ -24,14 +24,11 @@ A Pico has no on-board key generation or signing, so it connects with a token cr
 """
 
 import gc
-import json
-import os
 import sys
 import time
 
 import machine
 import network
-import ntptime
 
 from qualithm_device._device import DEFAULT_KEEPALIVE_S
 from qualithm_device._device import connect as _connect
@@ -42,6 +39,16 @@ from qualithm_device._micropython import (
     FlashStore,
     Session,
     Transport,
+)
+from qualithm_device._onboard import (
+    DEFAULT_SETUP_PATH,
+    SYSTEM_SENSORS,
+    WIFI_TIMEOUT_S,
+    SetupError,
+    WifiError,
+    forget_claim_code,
+    read_setup,
+    set_clock,
 )
 from qualithm_device.ui import light_at, light_state
 
@@ -71,10 +78,6 @@ __all__ = [
     "system_info",
 ]
 
-#: Where `qualithm deploy` writes the provisioning URL, Wi-Fi details and claim code.
-DEFAULT_SETUP_PATH = "/qualithm-setup.json"
-WIFI_TIMEOUT_S = 30
-_CLOCK_ATTEMPTS = 3
 _POLL_S = 0.2
 _TEMPERATURE_CHANNEL = 4
 # RP2040 and RP2350 datasheets: 0.706 V at 27 °C, falling 1.721 mV per degree.
@@ -82,30 +85,6 @@ _SENSOR_VOLTS_AT_27C = 0.706
 _SENSOR_VOLTS_PER_C = 0.001721
 _ADC_VOLTS = 3.3
 _ADC_FULL_SCALE = 65535
-
-
-#: The sensors `system_info` reports, which `pico.connect` declares on every board.
-SYSTEM_SENSORS: "tuple[dict[str, object], ...]" = (
-    {"key": "uptime_s", "type": "sensor", "metric": "uptime_s", "unit": "seconds"},
-    {"key": "free_memory_bytes", "type": "sensor", "metric": "free_memory_bytes", "unit": "bytes"},
-    {
-        "key": "chip_temperature_c",
-        "type": "sensor",
-        "metric": "chip_temperature_c",
-        "unit": "celsius",
-    },
-    {"key": "wifi_rssi_dbm", "type": "sensor", "metric": "wifi_rssi_dbm", "unit": "dBm"},
-    # Unitless: major * 10000 + minor * 100 + patch, so a dashboard shows which build is running.
-    {"key": "firmware_version", "type": "sensor", "metric": "firmware_version"},
-)
-
-
-class WifiError(QualithmDeviceError):
-    """The board couldn't join the Wi-Fi network or set its clock."""
-
-
-class SetupError(QualithmDeviceError):
-    """The setup file `qualithm deploy` writes is missing or malformed."""
 
 
 #: The status light's tick, in milliseconds: fine enough for the rhythm's 140 ms unit.
@@ -218,7 +197,7 @@ def join_wifi(ssid: str, password: str, *, timeout_s: int = WIFI_TIMEOUT_S) -> "
             if time.time() >= deadline:
                 raise WifiError(f"couldn't join {ssid} within {timeout_s} s")
             time.sleep(_POLL_S)
-    _set_clock()
+    set_clock()
     _station[:] = [wlan]
     return wlan
 
@@ -235,17 +214,6 @@ def _wifi_reason(status: int) -> str:
         f"the connection failed (status {status}); check the password and that the network"
         " uses WPA2 or WPA3 Personal"
     )
-
-
-def _set_clock() -> None:
-    for attempt in range(_CLOCK_ATTEMPTS):
-        try:
-            ntptime.settime()
-        except OSError as err:
-            if attempt == _CLOCK_ATTEMPTS - 1:
-                raise WifiError(f"couldn't set the clock from NTP: {err}") from err
-        else:
-            return
 
 
 # [accumulated ms, ticks at the last read]: ticks_ms wraps every 12 days, the uptime doesn't.
@@ -349,57 +317,6 @@ def connect(  # noqa: PLR0913 -- the core connect()'s options, by keyword
     return device
 
 
-def read_setup(path: str = DEFAULT_SETUP_PATH) -> "dict[str, object]":
-    """The setup file `qualithm deploy` writes.
-
-    Args:
-        path: Where it lives.
-
-    Returns:
-        `provisioningUrl`, `wifi` (`ssid`, `passphrase`) and, before the first claim, `claimCode`.
-
-    Raises:
-        SetupError: The file is missing, isn't JSON, or lacks a field.
-    """
-    try:
-        with open(path) as file:
-            text = file.read()
-    except OSError:
-        raise SetupError(
-            f"no setup file at {path}: run `qualithm deploy` to write one, or call"
-            " join_wifi() and connect() with the details"
-        ) from None
-    try:
-        data = json.loads(text)
-    except ValueError:
-        data = None
-    if not isinstance(data, dict):
-        raise SetupError(f"the setup file at {path} isn't a JSON object")
-    url = data.get("provisioningUrl")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] -- JSON
-    wifi = data.get("wifi")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] -- JSON
-    if not isinstance(url, str) or not url.startswith("https://"):
-        raise SetupError(f"the setup file at {path} has no https provisioningUrl")
-    if (
-        not isinstance(wifi, dict)
-        or not isinstance(wifi.get("ssid"), str)  # pyright: ignore[reportUnknownMemberType] -- JSON
-        or not wifi.get("ssid")  # pyright: ignore[reportUnknownMemberType] -- JSON
-        or not isinstance(wifi.get("passphrase"), str)  # pyright: ignore[reportUnknownMemberType] -- JSON
-    ):
-        raise SetupError(f"the setup file at {path} has no wifi ssid and passphrase")
-    code = data.get("claimCode")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] -- JSON
-    if code is not None and (not isinstance(code, str) or not code):
-        raise SetupError(f"the setup file at {path} has a claimCode that isn't a string")
-    return data  # pyright: ignore[reportUnknownVariableType] -- JSON
-
-
-def _forget_claim_code(path: str, setup: "dict[str, object]") -> None:
-    # The code is single-use; drop it once spent, replacing the file atomically as FlashStore does.
-    kept = {key: value for key, value in setup.items() if key != "claimCode"}
-    with open(path + ".tmp", "w") as file:
-        file.write(json.dumps(kept))
-    os.rename(path + ".tmp", path)
-
-
 def start(  # noqa: PLR0913 -- connect()'s options, by keyword
     *,
     capabilities: "Sequence[Mapping[str, object]]" = (),
@@ -465,5 +382,5 @@ def start(  # noqa: PLR0913 -- connect()'s options, by keyword
         light=status,
     )
     if code is not None:
-        _forget_claim_code(setup_path, setup)
+        forget_claim_code(setup_path, setup)
     return device

@@ -7,6 +7,8 @@ STAT_GOT_IP = 3
 STAT_CONNECT_FAIL = -1
 STAT_NO_AP_FOUND = -2
 STAT_WRONG_PASSWORD = -3
+# The esp32 port's alone: the network's security mode is one the board can't join.
+STAT_NO_AP_FOUND_W_COMPATIBLE_SECURITY = -4
 
 
 class WLAN:
