@@ -121,9 +121,18 @@ class SystemInfoTest(Esp32Case):
 
     def test_reads_the_station_when_nothing_was_joined(self):
         esp32._station[:] = []
+        network.WLAN.connected = True
         network.WLAN.rssi = -60
 
         self.assertEqual(esp32.system_info()["wifi_rssi_dbm"], -60)
+
+    def test_leaves_out_the_signal_strength_while_disconnected(self):
+        esp32._station[:] = []
+
+        info = esp32.system_info()
+
+        self.assertFalse("wifi_rssi_dbm" in info)
+        self.assertEqual(info["chip_temperature_c"], fake_esp32.temperature)
 
 
 class ConnectTest(Esp32Case):
