@@ -144,8 +144,8 @@ def system_info(wlan: "network.WLAN | None" = None) -> "dict[str, float]":
 
     Returns:
         `uptime_s`, `free_memory_bytes`, `chip_temperature_c` (whole degrees, as the chip's
-        sensor reads), `wifi_rssi_dbm`, and `firmware_version` as major * 10000 + minor * 100 +
-        patch (12900 for 1.29.0).
+        sensor reads), `wifi_rssi_dbm` while the station is connected, and `firmware_version`
+        as major * 10000 + minor * 100 + patch (12900 for 1.29.0).
     """
     if wlan is None:
         wlan = _station[0] if _station else network.WLAN(network.STA_IF)
@@ -154,13 +154,16 @@ def system_info(wlan: "network.WLAN | None" = None) -> "dict[str, float]":
     _uptime[1] = ticks
     gc.collect()
     major, minor, patch = sys.implementation.version[:3]
-    return {
+    info: "dict[str, float]" = {
         "uptime_s": _uptime[0] // 1000,
         "free_memory_bytes": gc.mem_free(),  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType] -- MicroPython's gc
         "chip_temperature_c": esp32.mcu_temperature(),
-        "wifi_rssi_dbm": wlan.status("rssi"),
         "firmware_version": major * 10000 + minor * 100 + patch,
     }
+    # The port raises for the signal strength while the station is down, as after a dropped link.
+    if wlan.isconnected():
+        info["wifi_rssi_dbm"] = wlan.status("rssi")
+    return info
 
 
 def connect(  # noqa: PLR0913 -- the core connect()'s options, by keyword
