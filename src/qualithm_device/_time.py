@@ -2,7 +2,17 @@
 
 from qualithm_device._errors import CredentialError
 
+TYPE_CHECKING = False
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from qualithm_device.interfaces import Clock
+
 SECONDS_PER_DAY = 86_400
+
+#: Seconds from 1970-01-01 to 2000-01-01, which a 2000-epoch port's `time.time()` lags Unix time by.
+EPOCH_2000_OFFSET_S = 946_684_800
+EPOCH_2000_YEAR = 2000
 
 
 def _days_from_civil(year: int, month: int, day: int) -> int:
@@ -76,3 +86,21 @@ def format_iso(seconds: float) -> str:
     hours, rest = divmod(rest, 3600)
     minutes, secs = divmod(rest, 60)
     return "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ" % (year, month, day, hours, minutes, secs, ms)
+
+
+def unix_clock(clock: "Clock") -> "Callable[[], float]":
+    """A clock in Unix seconds over a port's `time` module, whichever epoch the port counts from.
+
+    MicroPython's `esp32` port counts `time.time()` from 2000-01-01; the `rp2` and Unix ports and
+    CPython count from 1970. Readings and credential checks need Unix seconds on every port.
+
+    Args:
+        clock: The port's `time` module, or anything with its `time()` and `gmtime()`.
+
+    Returns:
+        A function that reads the current Unix time.
+    """
+    read = clock.time
+    if clock.gmtime(0)[0] != EPOCH_2000_YEAR:
+        return read
+    return lambda: read() + EPOCH_2000_OFFSET_S
