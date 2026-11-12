@@ -10,6 +10,12 @@ class MQTTException(Exception):  # noqa: N818 -- umqtt's own name
 class Sock:
     """The socket the real client opens, for the TLS context to wrap."""
 
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
 
 class MQTTClient:
     """Records the CONNECT fields and every call; `inbound` holds messages check_msg delivers."""
@@ -27,6 +33,7 @@ class MQTTClient:
         self.keepalive = keepalive
         self.ssl = ssl
         self.cb = None
+        self.sock = None
         self.connected = None
         self.published = []
         self.subscribed = []
@@ -41,8 +48,10 @@ class MQTTClient:
         self.cb = f
 
     def connect(self, clean_session=True, timeout=None):
+        # The real client keeps the socket it opened before the handshake, as `sock`.
+        self.sock = Sock()
         if self.ssl is not None:
-            self.ssl.wrap_socket(Sock(), server_hostname=self.server)
+            self.ssl.wrap_socket(self.sock, server_hostname=self.server)
         if MQTTClient.refuse is not None:
             raise MQTTException(MQTTClient.refuse)
         self.connected = (clean_session, timeout)
