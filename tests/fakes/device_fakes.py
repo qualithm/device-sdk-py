@@ -2,6 +2,8 @@
 
 import json
 
+from qualithm_device import GatewayUnavailableError
+
 
 def wire(name):
     """Load a wire fixture from tests/wire/."""
@@ -60,6 +62,7 @@ class FakeTransport:
         self.max_packet_size = max_packet_size
         self.unreachable = False
         self.refuse = False
+        self.unavailable_hosts = set()
 
     def request(self, method, url, headers, body):
         self.requests.append(
@@ -75,6 +78,9 @@ class FakeTransport:
     def open(self, host, port, client_id, username, password, key_pem, cert_pem, keepalive_s):  # noqa: PLR0917
         if self.refuse:
             raise OSError("connection refused")
+        if host in self.unavailable_hosts:
+            self.opened.append({"host": host, "port": port, "refused": True})
+            raise GatewayUnavailableError("the gateway is unavailable (code 3)")
         self.opened.append(
             {
                 "host": host,

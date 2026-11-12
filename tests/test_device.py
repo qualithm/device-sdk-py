@@ -178,6 +178,92 @@ class ConnectTest(unittest.TestCase):
             connect(URL, transport, MemoryStore(), claim_code="qmc_x.y", now=clock(JAN_1_2026))
 
 
+JAN_2_2026 = JAN_1_2026 + 86400
+HOME = {"host": "gw.test-de-fra-a.qualithm.com", "port": 8883}
+
+
+def renewal_naming(broker):
+    """The token renewal fixture's response, naming `broker` as the device's gateway."""
+    fixture = wire("renew")["token"]
+    body = json.loads(json.dumps(fixture["body"]))
+    if broker is not None:
+        body["data"]["broker"] = broker
+    return fixture, Response(fixture["status"], body)
+
+
+class MovedGatewayTest(unittest.TestCase):
+    def moved_transport(self, broker=HOME):
+        fixture, response = renewal_naming(broker)
+        transport = FakeTransport({"/v1/provision/credentials/renew": response})
+        transport.unavailable_hosts.add("gw.test-sg-sin-a.qualithm.com")
+        stored = dict(fixture["current"])
+        stored["broker"] = {"host": "gw.test-sg-sin-a.qualithm.com", "port": 8883}
+        return transport, MemoryStore(stored)
+
+    def test_renews_early_and_connects_to_the_gateway_it_names(self):
+        transport, store = self.moved_transport()
+        device = connect(URL, transport, store, now=clock(JAN_2_2026))
+        self.assertEqual(transport.opened[-1]["host"], HOME["host"])
+        self.assertEqual(transport.opened[-1]["password"], "qmd_new")
+        self.assertEqual(store.saves[-1]["broker"], HOME)
+        assert device.credential.broker is not None
+        self.assertEqual(device.credential.broker.to_dict(), HOME)
+        self.assertIsNone(device.renew_error)
+
+    def test_follows_it_past_a_configured_host(self):
+        transport, store = self.moved_transport()
+        connect(
+            URL,
+            transport,
+            store,
+            broker_host="gw.test-sg-sin-a.qualithm.com",
+            now=clock(JAN_2_2026),
+        )
+        self.assertEqual(transport.opened[-1]["host"], HOME["host"])
+
+    def test_reports_the_refusal_when_the_gateway_has_not_moved(self):
+        transport, store = self.moved_transport(
+            {"host": "gw.test-sg-sin-a.qualithm.com", "port": 8883}
+        )
+        with self.assertRaises(GatewayError):
+            connect(URL, transport, store, now=clock(JAN_2_2026))
+        self.assertEqual(len(transport.opened), 1)
+
+    def test_reports_the_refusal_when_renewal_names_no_gateway(self):
+        transport, store = self.moved_transport(None)
+        with self.assertRaises(GatewayError):
+            connect(URL, transport, store, now=clock(JAN_2_2026))
+
+    def test_does_not_renew_a_credential_issued_within_the_hour(self):
+        transport, store = self.moved_transport()
+        with self.assertRaises(GatewayError):
+            connect(URL, transport, store, now=clock(JAN_1_2026 + 60))
+        self.assertEqual(transport.requests, [])
+
+    def test_reports_the_refusal_when_renewal_fails(self):
+        transport, store = self.moved_transport()
+        transport.responses["/v1/provision/credentials/renew"] = Response(
+            429, wire("renew")["errors"][2]["body"]
+        )
+        with self.assertRaises(GatewayError):
+            connect(URL, transport, store, now=clock(JAN_2_2026))
+
+    def test_a_certificate_needs_crypto_to_renew_early(self):
+        stored = dict(wire("renew")["cert"]["current"])
+        transport = FakeTransport()
+        transport.unavailable_hosts.add(stored["broker"]["host"])
+        with self.assertRaises(GatewayError):
+            connect(URL, transport, MemoryStore(stored), now=clock(JAN_2_2026))
+        self.assertEqual(transport.requests, [])
+
+    def test_reports_a_failure_at_the_new_gateway(self):
+        transport, store = self.moved_transport()
+        transport.unavailable_hosts.add(HOME["host"])
+        with self.assertRaises(GatewayError):
+            connect(URL, transport, store, now=clock(JAN_2_2026))
+        self.assertEqual(store.saves[-1]["broker"], HOME)
+
+
 def fixture_invalid():
     return wire("capabilities")["invalid"]
 

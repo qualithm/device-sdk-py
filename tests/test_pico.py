@@ -13,7 +13,13 @@ from device_fakes import wire
 from pico_case import STORE_PATH, PicoCase, http
 from umqtt import simple
 
-from qualithm_device import CapabilityError, CredentialError, connect, pico
+from qualithm_device import (
+    CapabilityError,
+    CredentialError,
+    GatewayUnavailableError,
+    connect,
+    pico,
+)
 from qualithm_device._roots import ROOTS
 
 URL = "https://api.example.com"
@@ -227,6 +233,12 @@ class OpenTest(PicoCase):
             pico.Transport().open("gw", 8883, "d", "d", "bad", None, None, 60)
 
         self.assertIn("code 5", str(caught.exception))
+
+    def test_raises_gateway_unavailable_when_the_gateway_may_have_moved(self):
+        simple.MQTTClient.refuse = 3
+
+        with self.assertRaises(GatewayUnavailableError):
+            pico.Transport().open("gw", 8883, "d", "d", "t", None, None, 60)
 
 
 class SessionTest(PicoCase):

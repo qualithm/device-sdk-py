@@ -52,6 +52,15 @@ class GatewayError(QualithmDeviceError):
     """The device couldn't open or use its session with the gateway."""
 
 
+class GatewayUnavailableError(OSError):
+    """The gateway refused the session as unavailable.
+
+    That is how a gateway redirects an MQTT 3.1.1 client: renewing the credential names the gateway
+    the device belongs on now. A transport raises it from `open()`; the SDK turns it into a
+    `GatewayError` when no other gateway answers.
+    """
+
+
 class TopicError(QualithmDeviceError):
     """A topic, capability key or command payload breaks the wire grammar."""
 
