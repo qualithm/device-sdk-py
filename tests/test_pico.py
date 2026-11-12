@@ -17,6 +17,7 @@ from qualithm_device import (
     CapabilityError,
     CredentialError,
     GatewayUnavailableError,
+    _micropython,
     connect,
     pico,
 )
@@ -131,6 +132,13 @@ class RequestTest(PicoCase):
             b'{"a": 1}',
         )
 
+    def test_collects_memory_before_the_handshake(self):
+        fake_socket.response = http(204)
+
+        pico.Transport().request("GET", URL, {}, None)
+
+        self.assertEqual(fake_gc.collections, 1)
+
     def test_takes_a_port_and_a_bare_host(self):
         fake_socket.response = http(204)
 
@@ -225,6 +233,35 @@ class OpenTest(PicoCase):
             pico.Transport().open("gw", 8883, "d", "d", "t", None, None, 60)
 
         self.assertIn("couldn't verify the gateway", str(caught.exception))
+
+    def test_collects_memory_before_the_handshake(self):
+        pico.Transport().open("gw", 8883, "d", "d", "t", None, None, 60)
+
+        self.assertEqual(fake_gc.collections, 1)
+        self.assertFalse(simple.MQTTClient.instances[0].sock.closed)
+
+    def test_closes_the_socket_of_a_failed_connect(self):
+        for fail in ("handshake", "refuse"):
+            fake_tls.handshake_error = ValueError("bad") if fail == "handshake" else None
+            simple.MQTTClient.refuse = 5 if fail == "refuse" else None
+
+            with self.assertRaises(OSError):
+                pico.Transport().open("gw", 8883, "d", "d", "t", None, None, 60)
+
+            self.assertTrue(simple.MQTTClient.instances[-1].sock.closed)
+
+    def test_closing_tolerates_no_socket_or_one_already_gone(self):
+        class Gone:
+            def close(self):
+                raise OSError("EBADF")
+
+        class Client:
+            sock = None
+
+        client = Client()
+        _micropython._close_socket(client)  # pyright: ignore[reportArgumentType] -- a stand-in
+        client.sock = Gone()  # pyright: ignore[reportAttributeAccessIssue] -- a stand-in
+        _micropython._close_socket(client)  # pyright: ignore[reportArgumentType] -- a stand-in
 
     def test_raises_oserror_when_refused(self):
         simple.MQTTClient.refuse = 5
