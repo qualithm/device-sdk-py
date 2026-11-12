@@ -12,8 +12,11 @@ import time
 import tls
 from umqtt.simple import MQTTClient, MQTTException
 
-from qualithm_device._errors import CredentialError
+from qualithm_device._errors import CredentialError, GatewayUnavailableError
 from qualithm_device._roots import ROOTS
+
+#: The MQTT 3.1.1 CONNACK return code for server unavailable, which a moved gateway sends.
+CONNACK_SERVER_UNAVAILABLE = 3
 
 TYPE_CHECKING = False
 if TYPE_CHECKING:
@@ -180,6 +183,8 @@ def _mqtt(call: "Callable[..., object]", *args: object) -> object:
     try:
         return call(*args)
     except MQTTException as err:
+        if err.args and err.args[0] == CONNACK_SERVER_UNAVAILABLE:
+            raise GatewayUnavailableError("the gateway is unavailable (code 3)") from err
         raise OSError(f"the gateway refused the request (code {err.args[0]})") from err
     except ValueError as err:
         # MicroPython raises a certificate that doesn't verify as a ValueError.
