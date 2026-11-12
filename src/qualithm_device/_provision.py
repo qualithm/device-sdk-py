@@ -228,7 +228,8 @@ def renew(
             token=_field(data, "secret", RenewError),
             issued_at=format_iso(now),
             expires_at=_renewed_expiry(data),
-            broker=credential.broker,
+            # The gateway the device belongs on now, which may have moved since the last one.
+            broker=parse_broker(data.get("broker")) or credential.broker,
         )
     if credential.kind != CERT or not credential.private_key_pem or not credential.certificate_pem:
         raise CredentialError(f"a {credential.kind} credential has no renewal")

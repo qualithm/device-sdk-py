@@ -1,7 +1,8 @@
-"""A TestCase that swaps the board modules `qualithm_device.pico` reaches for host fakes."""
+"""TestCases that swap the board modules `pico` and `esp32` reach for host fakes."""
 
 import unittest
 
+import esp32 as fake_esp32
 import fake_gc
 import fake_socket
 import fake_time
@@ -11,7 +12,7 @@ import network
 import ntptime
 from umqtt import simple
 
-from qualithm_device import _micropython, pico
+from qualithm_device import _micropython, esp32, pico
 
 # MicroPython has no tempfile.
 STORE_PATH = "/tmp/qualithm-device-test-credential.json"  # noqa: S108
@@ -53,4 +54,22 @@ class PicoCase(NetCase):
     def tearDown(self):
         pico.gc, pico.time = self._board
         pico.FlashStore(STORE_PATH).clear()
+        super().tearDown()
+
+
+class Esp32Case(NetCase):
+    """Resets every fake the `esp32` adapters reach, and patches the Unix port's own builtins."""
+
+    def setUp(self):
+        super().setUp()
+        for fake in (network, ntptime, fake_esp32):
+            fake.reset()
+        self._board = (esp32.gc, esp32.time)
+        esp32.gc = fake_gc
+        esp32.time = fake_time
+        esp32.FlashStore(STORE_PATH).clear()
+
+    def tearDown(self):
+        esp32.gc, esp32.time = self._board
+        esp32.FlashStore(STORE_PATH).clear()
         super().tearDown()

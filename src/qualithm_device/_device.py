@@ -9,6 +9,7 @@ from qualithm_device._errors import (
     CapabilityError,
     CredentialError,
     GatewayError,
+    GatewayUnavailableError,
     PayloadTooLargeError,
     QualithmDeviceError,
     RenewError,
@@ -43,6 +44,9 @@ DEFAULT_PORT = 8883
 DEFAULT_KEEPALIVE_S = 60
 #: How far through its lifetime a credential renews: early enough to retry, late enough to be rare.
 RENEW_AT_FRACTION = 2 / 3
+#: How old a credential must be before an unavailable gateway renews it early to look for a moved
+#: one, so a gateway that is only down doesn't issue a credential on every connect.
+MOVED_RENEW_AFTER_S = 3600
 
 
 def resolve_broker(host: "str | None", port: "int | None", credential: Credential) -> Broker:
@@ -298,6 +302,58 @@ def _declared(declared: "dict[str, dict[str, object]]", key: str, kind: str) -> 
     return entry is not None and entry["type"] == kind
 
 
+def _open_session(
+    transport: "Transport", broker: Broker, credential: Credential, keepalive_s: int
+) -> "Session":
+    """Open the gateway session, presenting `credential`."""
+    is_cert = credential.kind == CERT
+    return transport.open(
+        broker.host,
+        broker.port,
+        credential.device_id,
+        None if is_cert else credential.device_id,
+        None if is_cert else credential.token,
+        credential.private_key_pem if is_cert else None,
+        credential.certificate_pem if is_cert else None,
+        keepalive_s,
+    )
+
+
+def _gateway_error(broker: Broker, err: OSError) -> GatewayError:
+    """The error for a session the gateway at `broker` didn't open."""
+    return GatewayError(f"failed to connect to the gateway at {broker.host}:{broker.port}: {err}")
+
+
+def _renew_for_moved_gateway(  # noqa: PLR0913, PLR0917 -- what connect() holds, handed over whole
+    credential: Credential,
+    transport: "Transport",
+    crypto: "Crypto | None",
+    provisioning_url: str,
+    now: float,
+    tried: Broker,
+) -> "Credential | None":
+    """Renew early after an unavailable gateway, to learn whether the device's gateway moved.
+
+    Returns:
+        The renewed credential when it names another gateway, or None when the credential is too
+        new to renew early, renewal failed, or the gateway hasn't moved.
+    """
+    from qualithm_device._time import parse_iso  # noqa: PLC0415 -- only after a refusal
+
+    if now < parse_iso(credential.issued_at) + MOVED_RENEW_AFTER_S:
+        return None
+    if credential.kind == CERT and crypto is None:
+        return None
+    try:
+        renewed = renew(transport, crypto, provisioning_url, credential, now)  # pyright: ignore[reportArgumentType] -- crypto is only read for a certificate
+    except RenewError:
+        return None
+    moved = renewed.broker
+    if moved is None or (moved.host == tried.host and moved.port == tried.port):
+        return None
+    return renewed
+
+
 def _try_renew(
     credential: Credential,
     transport: "Transport",
@@ -393,22 +449,25 @@ def connect(  # noqa: PLR0913 -- the hero API takes every option by keyword
         credential = renewed
 
     broker = resolve_broker(broker_host, broker_port, credential)
-    is_cert = credential.kind == CERT
     try:
-        session = transport.open(
-            broker.host,
-            broker.port,
-            credential.device_id,
-            None if is_cert else credential.device_id,
-            None if is_cert else credential.token,
-            credential.private_key_pem if is_cert else None,
-            credential.certificate_pem if is_cert else None,
-            keepalive_s,
+        session = _open_session(transport, broker, credential, keepalive_s)
+    except GatewayUnavailableError as err:
+        # How a gateway redirects an MQTT 3.1.1 client: renewal names where the device belongs.
+        moved = _renew_for_moved_gateway(
+            credential, transport, crypto, provisioning_url, clock(), broker
         )
+        if moved is None or moved.broker is None:
+            raise _gateway_error(broker, err) from err
+        store.save(moved.to_dict())
+        credential = moved
+        broker = moved.broker
+        renew_error = None
+        try:
+            session = _open_session(transport, broker, credential, keepalive_s)
+        except OSError as retry_err:
+            raise _gateway_error(broker, retry_err) from retry_err
     except OSError as err:
-        raise GatewayError(
-            f"failed to connect to the gateway at {broker.host}:{broker.port}: {err}"
-        ) from err
+        raise _gateway_error(broker, err) from err
     device = Device(
         session, credential, transport, crypto, store, provisioning_url, clock, manifest
     )
