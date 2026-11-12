@@ -44,13 +44,14 @@ uv add "qualithm-device @ git+https://github.com/qualithm/device-sdk-py"
 
 ## Run it on a Pico 2 W
 
-You need a Pico 2 W, a USB cable, a 2.4 GHz Wi-Fi network, and a claim code: the single-use code
-the platform gives you when you add a device.
+You need a Pico 2 W, a USB cable, a 2.4 GHz Wi-Fi network, and a claim code: the single-use code the
+platform gives you when you add a device.
 
 1. Flash MicroPython 1.29.0: hold BOOTSEL while plugging the board in, then copy the Pico 2 W `.uf2`
    from [micropython.org/download/RPI_PICO2_W](https://micropython.org/download/RPI_PICO2_W/) onto
    the `RP2350` drive that appears.
-2. Join Wi-Fi and install the SDK with [mpremote](https://docs.micropython.org/en/latest/reference/mpremote.html):
+2. Join Wi-Fi and install the SDK with
+   [mpremote](https://docs.micropython.org/en/latest/reference/mpremote.html):
 
    ```bash
    uvx mpremote exec "import network; w = network.WLAN(network.STA_IF); w.active(True); w.connect('<your-ssid>', '<your-password>')"
@@ -85,10 +86,10 @@ the platform gives you when you add a device.
    ```
 
 `pico.start` joins the network in `/qualithm-setup.json` and connects. On first boot the board
-claims itself, stores its credential in flash, and removes the spent claim code from the setup
-file; on a later boot it reuses the stored credential. Every minute it sends its uptime, free
-memory, chip temperature, Wi-Fi signal strength and firmware version. `pico.start` declares each of
-these as a sensor, so they appear on a dashboard.
+claims itself, stores its credential in flash, and removes the spent claim code from the setup file;
+on a later boot it reuses the stored credential. Every minute it sends its uptime, free memory, chip
+temperature, Wi-Fi signal strength and firmware version. `pico.start` declares each of these as a
+sensor, so they appear on a dashboard.
 
 The board's LED shows where it is:
 
@@ -106,21 +107,20 @@ Pass `light=None` to leave the LED to your own code. To show your own state late
 To pass the details in code instead, call `pico.join_wifi(ssid, password)` and then
 `pico.connect(provisioning_url, claim_code=...)`.
 
-`join_wifi` sets the clock from NTP, since the board checks each server's certificate and its
-dates. A Pico connects with a token credential: it has no on-board key generation for a
-certificate.
+`join_wifi` sets the clock from NTP, since the board checks each server's certificate and its dates.
+A Pico connects with a token credential: it has no on-board key generation for a certificate.
 
 ## Run it on an ESP32
 
-You need an ESP32-S3, ESP32-C3 or ESP32-C6 board, a USB cable, a 2.4 GHz Wi-Fi network, and a
-claim code. The reference boards are the M5Stack AtomS3 Lite (S3), Stamp C3 (C3) and NanoC6 (C6).
+You need an ESP32-S3, ESP32-C3 or ESP32-C6 board, a USB cable, a 2.4 GHz Wi-Fi network, and a claim
+code. The reference boards are the M5Stack AtomS3 Lite (S3), Stamp C3 (C3) and NanoC6 (C6).
 
 1. Download MicroPython 1.29.0 for your chip:
    [ESP32_GENERIC_S3](https://micropython.org/download/ESP32_GENERIC_S3/),
    [ESP32_GENERIC_C3](https://micropython.org/download/ESP32_GENERIC_C3/) or
    [ESP32_GENERIC_C6](https://micropython.org/download/ESP32_GENERIC_C6/). Flash it with
-   [esptool](https://docs.espressif.com/projects/esptool/), naming the chip (`esp32s3`, `esp32c3`
-   or `esp32c6`) and the `.bin` you downloaded:
+   [esptool](https://docs.espressif.com/projects/esptool/), naming the chip (`esp32s3`, `esp32c3` or
+   `esp32c6`) and the `.bin` you downloaded:
 
    ```bash
    uvx esptool --chip <your-chip> erase-flash
@@ -129,8 +129,7 @@ claim code. The reference boards are the M5Stack AtomS3 Lite (S3), Stamp C3 (C3)
 
    If esptool can't connect, hold the board's boot button while you plug it in, then run it again.
 
-2. Join Wi-Fi, install the SDK and write the setup file, as steps 2 and 3 of the Pico 2 W guide
-   do.
+2. Join Wi-Fi, install the SDK and write the setup file, as steps 2 and 3 of the Pico 2 W guide do.
 
 3. Save this as `main.py`, copy it to the board and reset it:
 
@@ -198,12 +197,11 @@ code.
    micropython main.py
    ```
 
-`board.start` uses the `pico` adapters on a Pico, the `esp32` adapters on an ESP32 and the
-`virtual` adapters anywhere else. The virtual device tells the platform it is virtual when it
-claims. It stores its credential in
-`qualithm-credential.json`, next to the setup file. Anyone who can read that directory can read
-the credential. Every minute it sends its uptime, free memory, firmware version and a stand-in chip
-temperature that swings around 25 °C.
+`board.start` uses the `pico` adapters on a Pico, the `esp32` adapters on an ESP32 and the `virtual`
+adapters anywhere else. The virtual device tells the platform it is virtual when it claims. It
+stores its credential in `qualithm-credential.json`, next to the setup file. Anyone who can read
+that directory can read the credential. Every minute it sends its uptime, free memory, firmware
+version and a stand-in chip temperature that swings around 25 °C.
 
 ## Quick Start
 
@@ -234,11 +232,11 @@ gateway accepts, `telemetry` or a `command/<key>` response, and raises `TopicErr
 The core holds the protocol; the board supplies three adapters, typed in
 `qualithm_device.interfaces`:
 
-| Adapter     | Methods                                                         |
-| ----------- | --------------------------------------------------------------- |
-| `transport` | `request(method, url, headers, body)` and `open(...)`           |
-| `crypto`    | `generate_csr(device_id)` and `sign(private_key_pem, message)`  |
-| `store`     | `load()`, `save(credential)` and `clear()`                      |
+| Adapter     | Methods                                                        |
+| ----------- | -------------------------------------------------------------- |
+| `transport` | `request(method, url, headers, body)` and `open(...)`          |
+| `crypto`    | `generate_csr(device_id)` and `sign(private_key_pem, message)` |
+| `store`     | `load()`, `save(credential)` and `clear()`                     |
 
 `qualithm_device.pico` holds the Pico 2 W and Pico W adapters: `Transport`, `FlashStore`,
 `join_wifi` and `system_info`, and `connect`, which uses them and declares `system_info`'s sensors.
@@ -276,8 +274,8 @@ device = pico.connect(
 device.publish_reading({"soil_moisture": 41.5})
 ```
 
-`device.declare_capabilities([...])` replaces the set and publishes it at once. The next
-`connect()` publishes the list passed to it.
+`device.declare_capabilities([...])` replaces the set and publishes it at once. The next `connect()`
+publishes the list passed to it.
 
 ### Commands
 
@@ -308,17 +306,17 @@ Once the credential has expired, as when renewal kept failing until its expiry, 
 
 Every error subclasses `QualithmDeviceError`:
 
-| Error                  | Raised when                                                            |
-| ---------------------- | ---------------------------------------------------------------------- |
+| Error                  | Raised when                                                                 |
+| ---------------------- | --------------------------------------------------------------------------- |
 | `CapabilityError`      | a capability is missing or invalid, or a command key is invalid or a sensor |
-| `ClaimError`           | the claim endpoint is unreachable or rejects the code                  |
-| `CredentialError`      | nothing is stored and there's no claim code, or the credential expired |
-| `EnrollError`          | certificate enrollment fails                                           |
-| `RenewError`           | renewal fails; kept in `device.renew_error`, never raised by `connect` |
-| `GatewayError`         | no broker is known, the session is refused, or a fresh one fails too   |
-| `TopicError`           | a topic, command payload or reading breaks the grammar                 |
-| `PayloadTooLargeError` | a payload exceeds the ceiling the gateway advertised                   |
-| `TooManyMetricsError`  | a reading carries more than 64 metrics, the most one event holds      |
+| `ClaimError`           | the claim endpoint is unreachable or rejects the code                       |
+| `CredentialError`      | nothing is stored and there's no claim code, or the credential expired      |
+| `EnrollError`          | certificate enrollment fails                                                |
+| `RenewError`           | renewal fails; kept in `device.renew_error`, never raised by `connect`      |
+| `GatewayError`         | no broker is known, the session is refused, or a fresh one fails too        |
+| `TopicError`           | a topic, command payload or reading breaks the grammar                      |
+| `PayloadTooLargeError` | a payload exceeds the ceiling the gateway advertised                        |
+| `TooManyMetricsError`  | a reading carries more than 64 metrics, the most one event holds            |
 
 ## API Reference
 
@@ -332,8 +330,8 @@ uv run python -m pydoc qualithm_device
 
 See the [`examples/`](examples/) directory:
 
-| Example                                       | Description                                       |
-| --------------------------------------------- | ------------------------------------------------- |
+| Example                                             | Description                                                |
+| --------------------------------------------------- | ---------------------------------------------------------- |
 | [`custom_adapters.py`](examples/custom_adapters.py) | The three adapters, written in memory, driving `connect()` |
 
 ```bash
