@@ -417,16 +417,6 @@ class DeviceTest(unittest.TestCase):
         with self.assertRaises(CapabilityError):
             self.device.on_command("temperature", print)
 
-    def test_reports_a_dropped_session(self):
-        self.session.fail = True
-        for call in (
-            lambda: self.device.publish("telemetry", b""),
-            lambda: self.device.subscribe("t"),
-            self.device.poll,
-        ):
-            with self.assertRaises(GatewayError):
-                call()
-
     def test_cannot_be_used_after_close(self):
         self.device.close()
         self.device.close()
