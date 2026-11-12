@@ -4,6 +4,7 @@ Shared by the adapters that run MicroPython: a Pico on its flash, and a virtual 
 host's Unix port.
 """
 
+import gc
 import json
 import os
 import socket
@@ -30,6 +31,10 @@ _HTTPS_PORT = 443
 
 
 def _context(cadata: str, key_pem: "str | None", cert_pem: "str | None") -> "tls.SSLContext":
+    # A handshake needs tens of kilobytes at once. Right after boot, the garbage from importing
+    # the program leaves an ESP32-C3 short of that until collected, and the handshake fails with
+    # ENOMEM; collecting first also frees a failed attempt's socket and TLS context for a retry.
+    gc.collect()
     context = tls.SSLContext(tls.PROTOCOL_TLS_CLIENT)
     context.verify_mode = tls.CERT_REQUIRED
     context.load_verify_locations(cadata)
@@ -193,6 +198,17 @@ def _mqtt(call: "Callable[..., object]", *args: object) -> object:
         raise OSError("the gateway sent a malformed packet") from err
 
 
+def _close_socket(client: MQTTClient) -> None:
+    """Close the socket a failed connect left open, so a retry has its memory."""
+    sock = getattr(client, "sock", None)
+    if sock is None:
+        return
+    try:  # noqa: SIM105 -- MicroPython has no contextlib
+        sock.close()
+    except OSError:
+        pass
+
+
 class Transport:
     """HTTPS and MQTT over the board's TLS, verifying every certificate."""
 
@@ -300,7 +316,11 @@ class Transport:
             keepalive=keepalive_s,
             ssl=_context(self._cadata, key_pem, cert_pem),
         )
-        _mqtt(client.connect, True, self._timeout_s)
+        try:
+            _mqtt(client.connect, True, self._timeout_s)
+        except OSError:
+            _close_socket(client)
+            raise
         return Session(client, keepalive_s, self._now)
 
 

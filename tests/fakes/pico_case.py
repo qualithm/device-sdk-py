@@ -29,13 +29,14 @@ class NetCase(unittest.TestCase):
     def setUp(self):
         for fake in (fake_gc, fake_socket, fake_time, fake_tls, simple):
             fake.reset()
-        self._net = (_micropython.socket, _micropython.time, _micropython.tls)
+        self._net = (_micropython.socket, _micropython.time, _micropython.tls, _micropython.gc)
         _micropython.socket = fake_socket
         _micropython.time = fake_time
         _micropython.tls = fake_tls
+        _micropython.gc = fake_gc
 
     def tearDown(self):
-        _micropython.socket, _micropython.time, _micropython.tls = self._net
+        _micropython.socket, _micropython.time, _micropython.tls, _micropython.gc = self._net
 
 
 class PicoCase(NetCase):
