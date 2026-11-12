@@ -3,6 +3,7 @@
 import json
 import time
 
+from qualithm_device._backoff import reconnect_delay
 from qualithm_device._capability import build_manifest, fits_declaration
 from qualithm_device._credential import CERT, Broker, Credential
 from qualithm_device._errors import (
@@ -11,7 +12,6 @@ from qualithm_device._errors import (
     GatewayError,
     GatewayUnavailableError,
     PayloadTooLargeError,
-    QualithmDeviceError,
     RenewError,
     TooManyMetricsError,
     TopicError,
@@ -94,6 +94,9 @@ def renew_due(credential: Credential, now: float) -> bool:
 class Device:
     """A device with an open gateway session. Made by `connect()`.
 
+    The session stays open on its own: a renewed credential reopens it, and a dropped one
+    reconnects with `reconnect_delay` backoff, publishing the capabilities and subscribing again.
+
     Attributes:
         credential: The credential the session authenticated with.
         renew_error: The last renewal failure, kept while the old credential is still valid.
@@ -109,27 +112,114 @@ class Device:
         provisioning_url: str,
         now: "Callable[[], float]",
         manifest: "dict[str, object]",
+        *,
+        broker: "Broker | None" = None,
+        broker_host: "str | None" = None,
+        broker_port: "int | None" = None,
+        keepalive_s: int = DEFAULT_KEEPALIVE_S,
+        sleep_ms: "Callable[[int], None] | None" = None,
     ) -> None:
         """Take over an open session; use `connect()` rather than calling this."""
         self.credential = credential
         self.renew_error: RenewError | None = None
         self._session: Session | None = session
+        self._closed = False
         self._transport = transport
         self._crypto = crypto
         self._store = store
         self._provisioning_url = provisioning_url
         self._now = now
+        self._broker = broker
+        self._broker_host = broker_host
+        self._broker_port = broker_port
+        self._keepalive_s = keepalive_s
+        self._sleep_ms = _sleep_ms if sleep_ms is None else sleep_ms
         self._handlers: dict[str, CommandHandler] = {}
         self._commands_subscribed = False
+        self._filters: list[str] = []
+        self._manifest = manifest
         self._declared = _declarations(manifest)
 
-    def _open(self) -> "Session":
-        if self._session is None:
+    def _live(self) -> "Session":
+        """The open session, reconnecting first when it dropped."""
+        if self._closed:
             raise GatewayError("device is closed")
-        return self._session
+        session = self._session
+        return self._reconnect() if session is None else session
+
+    def _drop(self) -> None:
+        """Forget a session that failed, closing what is left of it."""
+        session = self._session
+        self._session = None
+        if session is not None:
+            try:  # noqa: SIM105 -- MicroPython has no contextlib
+                session.close()
+            except OSError:
+                pass
+
+    def _reconnect(self) -> "Session":
+        """Open a new session, retrying with backoff until the gateway accepts one.
+
+        Raises:
+            CredentialError: The credential expired: claim the device again.
+            GatewayError: No broker is known.
+            PayloadTooLargeError: The manifest exceeds the new session's ceiling.
+        """
+        attempt = 0
+        followed = False
+        while True:
+            expires = self.credential.expires_at_s()
+            if expires is not None and self._now() >= expires:
+                raise CredentialError(
+                    f"the credential expired at {self.credential.expires_at}: claim the device"
+                    " again"
+                )
+            if self._renew():
+                self._broker = resolve_broker(self._broker_host, self._broker_port, self.credential)
+            broker = self._broker
+            if broker is None:
+                broker = resolve_broker(self._broker_host, self._broker_port, self.credential)
+                self._broker = broker
+            try:
+                return self._resume(broker)
+            except GatewayUnavailableError:
+                moved = _renew_for_moved_gateway(
+                    self.credential,
+                    self._transport,
+                    self._crypto,
+                    self._provisioning_url,
+                    self._now(),
+                    broker,
+                )
+                if moved is not None:
+                    self._store.save(moved.to_dict())
+                    self.credential = moved
+                    self.renew_error = None
+                    self._broker = moved.broker
+                    if not followed:
+                        # Straight to the gateway renewal named, once.
+                        followed = True
+                        continue
+            except OSError:
+                pass
+            attempt += 1
+            self._sleep_ms(reconnect_delay(attempt))
+
+    def _resume(self, broker: Broker) -> "Session":
+        """Open a session at `broker`, then publish the capabilities and subscribe again."""
+        session = _open_session(self._transport, broker, self.credential, self._keepalive_s)
+        self._session = session
+        try:
+            _publish_manifest(session, self._manifest)
+            for topic_filter in self._filters:
+                session.subscribe(topic_filter)
+        except (OSError, PayloadTooLargeError):
+            self._drop()
+            raise
+        return session
 
     def publish(self, topic: str, payload: "bytes | str") -> None:
-        """Publish to a device-relative topic.
+        """Publish to a device-relative topic, reconnecting first when the session dropped.
 
         Args:
             topic: The topic, e.g. `telemetry`.
@@ -138,18 +228,24 @@ class Device:
         Raises:
             TopicError: The topic breaks the grammar.
             PayloadTooLargeError: The payload exceeds the ceiling the gateway advertised.
-            GatewayError: The device is closed, or the publish failed.
+            CredentialError: The session dropped and the credential has expired.
+            GatewayError: The device is closed, or the publish failed on a fresh session too.
         """
         check_publish_topic(topic)
         body = payload.encode() if isinstance(payload, str) else payload
-        session = self._open()
-        limit = session.max_packet_size
-        if limit is not None and len(body) > limit:
-            raise PayloadTooLargeError(limit, len(body))
-        try:
-            session.publish(topic, body)
-        except OSError as err:
-            raise GatewayError(f"publish to {topic} failed: {err}") from err
+        for retry in (False, True):
+            session = self._live()
+            limit = session.max_packet_size
+            if limit is not None and len(body) > limit:
+                raise PayloadTooLargeError(limit, len(body))
+            try:
+                session.publish(topic, body)
+            except OSError as err:
+                self._drop()
+                if retry:
+                    raise GatewayError(f"publish to {topic} failed: {err}") from err
+            else:
+                return
 
     def publish_reading(self, metrics: "dict[str, float]", ts_ms: "int | None" = None) -> None:
         """Publish a reading the platform stores: each metric's name and number, at one time.
@@ -162,7 +258,8 @@ class Device:
             TopicError: There are no metrics, or a value isn't a number.
             TooManyMetricsError: The reading carries more than 64 metrics.
             PayloadTooLargeError: The reading exceeds the gateway's ceiling.
-            GatewayError: The device is closed, or the publish failed.
+            CredentialError: The session dropped and the credential has expired.
+            GatewayError: The device is closed, or the publish failed on a fresh session too.
         """
         if len(metrics) > MAX_METRICS:
             raise TooManyMetricsError(MAX_METRICS, len(metrics))
@@ -170,20 +267,30 @@ class Device:
         self.publish(TELEMETRY_TOPIC, telemetry_payload(metrics, when))
 
     def subscribe(self, topic_filter: str) -> None:
-        """Subscribe to a device-relative topic filter.
+        """Subscribe to a device-relative topic filter, kept across reconnects.
 
         Args:
             topic_filter: The filter; `+` fills one level and `#` ends one.
 
         Raises:
             TopicError: The filter breaks the grammar.
-            GatewayError: The device is closed, or the subscribe failed.
+            CredentialError: The session dropped and the credential has expired.
+            GatewayError: The device is closed, or the subscribe failed on a fresh session too.
         """
         check_topic_filter(topic_filter)
-        try:
-            self._open().subscribe(topic_filter)
-        except OSError as err:
-            raise GatewayError(f"subscribe to {topic_filter} failed: {err}") from err
+        if topic_filter in self._filters:
+            return
+        for retry in (False, True):
+            session = self._live()
+            try:
+                session.subscribe(topic_filter)
+            except OSError as err:
+                self._drop()
+                if retry:
+                    raise GatewayError(f"subscribe to {topic_filter} failed: {err}") from err
+            else:
+                self._filters.append(topic_filter)
+                return
 
     def on_command(self, key: str, handler: "CommandHandler") -> None:
         """Call `handler` for each command addressed to a capability.
@@ -211,7 +318,8 @@ class Device:
     def declare_capabilities(self, capabilities: "Sequence[Mapping[str, object]]") -> None:
         """Replace the device's capabilities and publish the new manifest now.
 
-        A later `connect()` publishes the capabilities passed to it, so pass the same set there.
+        A reconnect publishes the new set again; a later `connect()` publishes the capabilities
+        passed to it, so pass the same set there.
 
         Args:
             capabilities: At least one capability declaration, each with a unique key.
@@ -223,11 +331,13 @@ class Device:
         """
         manifest = build_manifest(capabilities)
         self.publish(MANIFEST_TOPIC, json.dumps(manifest))
+        self._manifest = manifest
         self._declared = _declarations(manifest)
 
     def poll(self) -> "list[tuple[str, bytes]]":
         """Service the session, run command handlers, and return every other message.
 
+        A dropped session reconnects first, waiting `reconnect_delay` between refused attempts.
         A command with no handler, whose payload doesn't decode, or whose value doesn't fit the
         declared capability comes back with the rest; its handler isn't called.
 
@@ -235,12 +345,20 @@ class Device:
             The (topic, payload) pairs received since the last poll that no handler took.
 
         Raises:
-            GatewayError: The device is closed, or the session dropped.
+            CredentialError: The session dropped and the credential has expired.
+            GatewayError: The device is closed, or a fresh session dropped too.
         """
-        try:
-            messages = self._open().poll()
-        except OSError as err:
-            raise GatewayError(f"session dropped: {err}") from err
+        messages: list[tuple[str, bytes]] = []
+        for retry in (False, True):
+            session = self._live()
+            try:
+                messages = session.poll()
+            except OSError as err:
+                self._drop()
+                if retry:
+                    raise GatewayError(f"session dropped: {err}") from err
+            else:
+                break
         rest: list[tuple[str, bytes]] = []
         for topic, payload in messages:
             key = command_key(topic)
@@ -260,15 +378,8 @@ class Device:
             handler(None if command.trigger else command.value)
         return rest
 
-    def renew_if_due(self) -> bool:
-        """Renew the credential once it is due, and store the new one.
-
-        The open session keeps its credential; the next `connect()` uses the new one. A failure
-        is kept in `renew_error` while the current credential is still valid, and retried later.
-
-        Returns:
-            True when a renewed credential was stored.
-        """
+    def _renew(self) -> bool:
+        """Renew the credential once it is due and store the new one; keep a failure."""
         renewed = _try_renew(
             self.credential, self._transport, self._crypto, self._provisioning_url, self._now()
         )
@@ -282,12 +393,50 @@ class Device:
         self.renew_error = None
         return True
 
+    def renew_if_due(self) -> bool:
+        """Renew the credential once it is due, store it, and reopen the session on it.
+
+        The session reopens before the old credential expires, so the gateway never drops it
+        for an expired one. A failure is kept in `renew_error` while the current credential is
+        still valid, and retried later.
+
+        Returns:
+            True when a renewed credential was stored.
+
+        Raises:
+            GatewayError: No broker is known for the renewed credential.
+        """
+        if not self._renew():
+            return False
+        self._broker = resolve_broker(self._broker_host, self._broker_port, self.credential)
+        if not self._closed:
+            self._drop()
+            self._reconnect()
+        return True
+
     def close(self) -> None:
         """Disconnect. The device can't be used afterwards; `connect()` again to reconnect."""
-        session = self._session
-        self._session = None
-        if session is not None:
-            session.close()
+        self._closed = True
+        self._drop()
+
+
+def _publish_manifest(session: "Session", manifest: "dict[str, object]") -> None:
+    """Publish the capability manifest on `session`.
+
+    Raises:
+        PayloadTooLargeError: It exceeds the session's ceiling.
+        OSError: The publish failed.
+    """
+    body = json.dumps(manifest).encode()
+    limit = session.max_packet_size
+    if limit is not None and len(body) > limit:
+        raise PayloadTooLargeError(limit, len(body))
+    session.publish(MANIFEST_TOPIC, body)
+
+
+def _sleep_ms(ms: int) -> None:
+    """Wait `ms` milliseconds."""
+    time.sleep(ms / 1000)
 
 
 def _declarations(manifest: "dict[str, object]") -> "dict[str, dict[str, object]]":
@@ -469,12 +618,26 @@ def connect(  # noqa: PLR0913 -- the hero API takes every option by keyword
     except OSError as err:
         raise _gateway_error(broker, err) from err
     device = Device(
-        session, credential, transport, crypto, store, provisioning_url, clock, manifest
+        session,
+        credential,
+        transport,
+        crypto,
+        store,
+        provisioning_url,
+        clock,
+        manifest,
+        broker=broker,
+        broker_host=broker_host,
+        broker_port=broker_port,
+        keepalive_s=keepalive_s,
     )
     device.renew_error = renew_error
     try:
-        device.publish(MANIFEST_TOPIC, json.dumps(manifest))
-    except QualithmDeviceError:
+        _publish_manifest(session, manifest)
+    except OSError as err:
+        device.close()
+        raise GatewayError(f"publish to {MANIFEST_TOPIC} failed: {err}") from err
+    except PayloadTooLargeError:
         device.close()
         raise
     return device

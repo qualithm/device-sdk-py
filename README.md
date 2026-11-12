@@ -14,6 +14,8 @@ declares what the device can do.
   stored credential.
 - **Renewal on time.** A token or certificate credential renews two thirds of the way through its
   lifetime, and a failed renewal keeps the device on its current credential.
+- **A session that stays up.** A renewal reopens the session on the new credential, and a dropped
+  session reconnects with backoff, so the main loop has no reconnect code.
 - **Capabilities declared on every connect.** Dashboards and automations list what a device
   declares, so every device declares at least one capability.
 - **Certificate enrollment.** A token credential upgrades to an mTLS certificate.
@@ -31,7 +33,7 @@ On a board running MicroPython 1.29.0:
 ```python
 import mip
 
-mip.install("github:qualithm/device-sdk-py@0.3.2")
+mip.install("github:qualithm/device-sdk-py@0.9.0")
 ```
 
 On CPython:
@@ -52,7 +54,7 @@ the platform gives you when you add a device.
 
    ```bash
    uvx mpremote exec "import network; w = network.WLAN(network.STA_IF); w.active(True); w.connect('<your-ssid>', '<your-password>')"
-   uvx mpremote exec "import mip; mip.install('github:qualithm/device-sdk-py@0.3.2')"
+   uvx mpremote exec "import mip; mip.install('github:qualithm/device-sdk-py@0.9.0')"
    ```
 
 3. Write the setup file the board reads on boot, with your network and claim code filled in:
@@ -166,7 +168,7 @@ code.
 
    ```bash
    brew install micropython
-   micropython -m mip install github:qualithm/device-sdk-py@0.3.2
+   micropython -m mip install github:qualithm/device-sdk-py@0.9.0
    ```
 
 2. Write the setup file in your project's directory, with your claim code filled in:
@@ -293,9 +295,14 @@ back from `poll()` with the other messages.
 
 ### Renewal and reconnecting
 
-Call `device.renew_if_due()` from the main loop. A renewed credential is stored and used by the next
-`connect()`. When the session drops, `poll()` raises `GatewayError`. Close the device, wait
-`reconnect_delay(attempt)` milliseconds, and call `connect()` again.
+Call `device.renew_if_due()` from the main loop. A renewed credential is stored, and the session
+reopens on it before the old one expires. When the session drops, the next `publish()` or `poll()`
+reconnects first, waiting `reconnect_delay(attempt)` milliseconds between refused attempts, then
+declares the capabilities and subscribes to its topics again. The loop needs no reconnect code of
+its own.
+
+Once the credential has expired, as when renewal kept failing until its expiry, a reconnect raises
+`CredentialError`: claim the device again.
 
 ### Error Handling
 
@@ -308,7 +315,7 @@ Every error subclasses `QualithmDeviceError`:
 | `CredentialError`      | nothing is stored and there's no claim code, or the credential expired |
 | `EnrollError`          | certificate enrollment fails                                           |
 | `RenewError`           | renewal fails; kept in `device.renew_error`, never raised by `connect` |
-| `GatewayError`         | no broker is known, or the session is refused or drops                 |
+| `GatewayError`         | no broker is known, the session is refused, or a fresh one fails too   |
 | `TopicError`           | a topic, command payload or reading breaks the grammar                 |
 | `PayloadTooLargeError` | a payload exceeds the ceiling the gateway advertised                   |
 | `TooManyMetricsError`  | a reading carries more than 64 metrics, the most one event holds      |
