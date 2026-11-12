@@ -13,8 +13,10 @@ from pico_case import STORE_PATH, Esp32Case, http
 from umqtt import simple
 
 from qualithm_device import CredentialError, esp32, pico
+from qualithm_device._time import EPOCH_2000_OFFSET_S
 
 URL = "https://api.example.com"
+JAN_1_2026 = 1767225600
 SETUP_PATH = "/tmp/qualithm-device-test-esp32-setup.json"  # noqa: S108 -- MicroPython has no tempfile
 SETUP = {
     "provisioningUrl": URL,
@@ -160,6 +162,17 @@ class ConnectTest(Esp32Case):
             sorted(json.loads(payload)["metrics"]),
         )
         self.assertEqual(light.states, ["slow-pulse", "q-once"])
+
+    def test_stamps_readings_in_unix_time_on_the_2000_epoch_port(self):
+        claim_response()
+        fake_time.epoch = 2000
+        fake_time.seconds = JAN_1_2026 - EPOCH_2000_OFFSET_S
+
+        device = esp32.connect(URL, store=esp32.FlashStore(STORE_PATH), claim_code="qmc_x.y")
+        device.publish_reading({"t": 1})
+
+        _, payload = simple.MQTTClient.instances[0].published[-1]
+        self.assertEqual(json.loads(payload)["ts"], JAN_1_2026 * 1000)
 
     def test_shows_steady_when_it_reconnects(self):
         claim_response()

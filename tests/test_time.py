@@ -1,6 +1,7 @@
 import unittest
 
 from qualithm_device import CredentialError, format_iso, parse_iso
+from qualithm_device._time import EPOCH_2000_OFFSET_S, unix_clock
 
 JAN_1_2026 = 1767225600
 
@@ -33,3 +34,36 @@ class TimeTest(unittest.TestCase):
         for text in ("yesterday", "2026-01-01", "2026-01-01T00:00:00+02:00"):
             with self.assertRaises(CredentialError):
                 parse_iso(text)
+
+
+class Clock:
+    """A port's `time` module whose clock counts from `epoch`."""
+
+    def __init__(self, epoch, seconds):
+        self.epoch = epoch
+        self.seconds = seconds
+
+    def time(self):
+        return self.seconds
+
+    def gmtime(self, secs):
+        return (self.epoch, 1, 1, 0, 0, secs, 0, 0)
+
+
+class UnixClockTest(unittest.TestCase):
+    def test_adds_the_offset_on_a_2000_epoch_port(self):
+        clock = Clock(2000, JAN_1_2026 - EPOCH_2000_OFFSET_S)
+
+        now = unix_clock(clock)
+
+        self.assertEqual(now(), JAN_1_2026)
+        clock.seconds += 5
+        self.assertEqual(now(), JAN_1_2026 + 5)
+
+    def test_reads_a_1970_epoch_port_as_it_is(self):
+        clock = Clock(1970, JAN_1_2026)
+
+        self.assertEqual(unix_clock(clock)(), JAN_1_2026)
+
+    def test_the_offset_is_2000_01_01(self):
+        self.assertEqual(format_iso(EPOCH_2000_OFFSET_S), "2000-01-01T00:00:00.000Z")

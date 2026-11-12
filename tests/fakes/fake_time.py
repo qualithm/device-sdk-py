@@ -4,6 +4,8 @@ PERIOD = 1 << 30
 
 ticks = 0
 seconds = 1767225600
+#: The year the port's clock counts from: 1970, or 2000 on MicroPython's `esp32` port.
+epoch = 1970
 #: Each sleep, in seconds.
 slept = []
 
@@ -31,8 +33,13 @@ def time():
     return seconds
 
 
+def gmtime(secs):
+    return (epoch, 1, 1, 0, 0, secs, 0, 0)
+
+
 def reset():
-    global ticks, seconds  # noqa: PLW0603 -- module state a test scripts
+    global ticks, seconds, epoch  # noqa: PLW0603 -- module state a test scripts
     ticks = 0
     seconds = 1767225600
+    epoch = 1970
     slept.clear()

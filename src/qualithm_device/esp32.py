@@ -45,6 +45,7 @@ from qualithm_device._onboard import (
     read_setup,
     set_clock,
 )
+from qualithm_device._time import unix_clock
 
 TYPE_CHECKING = False
 if TYPE_CHECKING:
@@ -220,7 +221,7 @@ def connect(  # noqa: PLR0913 -- the core connect()'s options, by keyword
             broker_host=broker_host,
             broker_port=broker_port,
             keepalive_s=keepalive_s,
-            now=time.time,
+            now=unix_clock(time),
         )
     except (QualithmDeviceError, OSError):
         if light is not None:
