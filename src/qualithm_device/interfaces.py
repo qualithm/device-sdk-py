@@ -85,3 +85,14 @@ if TYPE_CHECKING:
         def show(self, state: str) -> None:
             """Play a state of `ui.LIGHT_STEPS` from its start."""
             ...
+
+    class Clock(Protocol):
+        """A port's `time` module, as far as reading the wall clock goes."""
+
+        def time(self) -> float:
+            """The seconds since the port's epoch."""
+            ...
+
+        def gmtime(self, __secs: int) -> "tuple[int, ...]":
+            """The UTC date and time some seconds after the port's epoch, year first."""
+            ...
