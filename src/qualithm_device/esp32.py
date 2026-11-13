@@ -103,16 +103,28 @@ def join_wifi(ssid: str, password: str, *, timeout_s: int = WIFI_TIMEOUT_S) -> "
         # The port reports a failed join as the driver's disconnect reason in place of a status.
         waiting = (network.STAT_IDLE, network.STAT_CONNECTING, network.STAT_GOT_IP)
         deadline = time.time() + timeout_s
+        failed = None
         while not wlan.isconnected():
             status = wlan.status()
             if status not in waiting:
-                raise WifiError(f"couldn't join {ssid}: {_wifi_reason(status)}")
+                # A failed join can pass on a cold boot, so join again until the deadline.
+                if failed is None:
+                    wlan.connect(ssid, password)
+                failed = status
+            else:
+                failed = None
             if time.time() >= deadline:
-                raise WifiError(f"couldn't join {ssid} within {timeout_s} s")
+                raise _join_failed(ssid, timeout_s, failed)
             time.sleep(_POLL_S)
     set_clock()
     _station[:] = [wlan]
     return wlan
+
+
+def _join_failed(ssid: str, timeout_s: int, status: "int | None") -> WifiError:
+    if status is None:
+        return WifiError(f"couldn't join {ssid} within {timeout_s} s")
+    return WifiError(f"couldn't join {ssid}: {_wifi_reason(status)}")
 
 
 def _wifi_reason(status: int) -> str:

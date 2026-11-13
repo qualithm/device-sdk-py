@@ -183,24 +183,36 @@ def join_wifi(ssid: str, password: str, *, timeout_s: int = WIFI_TIMEOUT_S) -> "
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
     if not wlan.isconnected():
-        # WPA2/WPA3 mixed joins WPA2-only, mixed and WPA3-only networks; firmware without the
-        # constant keeps the driver's default, WPA2.
-        security = getattr(network.WLAN, "SEC_WPA2_WPA3", None)
-        if security is None:
-            wlan.connect(ssid, password)
-        else:
-            wlan.connect(ssid, password, security=security)  # pyright: ignore[reportCallIssue] -- the stubs lag the cyw43 driver, which takes it
+        _join(wlan, ssid, password)
         deadline = time.time() + timeout_s
+        failed = None
         while not wlan.isconnected():
             status = wlan.status()
             if status < 0:
-                raise WifiError(f"couldn't join {ssid}: {_wifi_reason(status)}")
+                # A failed join can pass on a cold boot, so join again until the deadline.
+                if failed is None:
+                    _join(wlan, ssid, password)
+                failed = status
+            else:
+                failed = None
             if time.time() >= deadline:
-                raise WifiError(f"couldn't join {ssid} within {timeout_s} s")
+                if failed is None:
+                    raise WifiError(f"couldn't join {ssid} within {timeout_s} s")
+                raise WifiError(f"couldn't join {ssid}: {_wifi_reason(failed)}")
             time.sleep(_POLL_S)
     set_clock()
     _station[:] = [wlan]
     return wlan
+
+
+def _join(wlan: "network.WLAN", ssid: str, password: str) -> None:
+    # WPA2/WPA3 mixed joins WPA2-only, mixed and WPA3-only networks; firmware without the
+    # constant keeps the driver's default, WPA2.
+    security = getattr(network.WLAN, "SEC_WPA2_WPA3", None)
+    if security is None:
+        wlan.connect(ssid, password)
+    else:
+        wlan.connect(ssid, password, security=security)  # pyright: ignore[reportCallIssue] -- the stubs lag the cyw43 driver, which takes it
 
 
 def _wifi_reason(status: int) -> str:
