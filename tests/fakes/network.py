@@ -27,6 +27,7 @@ class WLAN:
         self.is_active = False
         self.joined = None
         self.security = None
+        self.joins = 0
         self._reads = 0
         WLAN.instances.append(self)
 
@@ -35,6 +36,7 @@ class WLAN:
 
     def connect(self, ssid, password, security=None):
         self.joined = (ssid, password)
+        self.joins += 1
         self.security = security
 
     def _current(self):

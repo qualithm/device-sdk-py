@@ -79,8 +79,20 @@ class JoinWifiTest(PicoCase):
         ):
             network.WLAN.statuses = [status]
             with self.assertRaises(pico.WifiError) as caught:
-                pico.join_wifi("home", "secret")
+                pico.join_wifi("home", "secret", timeout_s=1)
             self.assertIn(reason, str(caught.exception))
+
+    def test_joins_again_when_a_failed_status_passes(self):
+        network.WLAN.statuses = [
+            network.STAT_WRONG_PASSWORD,
+            network.STAT_CONNECTING,
+            network.STAT_GOT_IP,
+        ]
+
+        pico.join_wifi("home", "secret")
+
+        self.assertEqual(network.WLAN.instances[-1].security, network.WLAN.SEC_WPA2_WPA3)
+        self.assertEqual(ntptime.calls, 1)
 
     def test_gives_up_after_the_timeout(self):
         network.WLAN.statuses = [network.STAT_CONNECTING]
