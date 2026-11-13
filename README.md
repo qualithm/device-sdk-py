@@ -116,9 +116,10 @@ You need an ESP32-S3, ESP32-C3 or ESP32-C6 board, a USB cable, a 2.4 GHz Wi-Fi n
 code. The reference boards are the M5Stack AtomS3 Lite (S3), Stamp C3 (C3) and NanoC6 (C6).
 
 1. Download MicroPython 1.29.0 for your chip:
-   [ESP32_GENERIC_S3](https://micropython.org/download/ESP32_GENERIC_S3/),
-   [ESP32_GENERIC_C3](https://micropython.org/download/ESP32_GENERIC_C3/) or
-   [ESP32_GENERIC_C6](https://micropython.org/download/ESP32_GENERIC_C6/). Flash it with
+   [ESP32_GENERIC_S3](https://micropython.org/download/ESP32_GENERIC_S3/) or
+   [ESP32_GENERIC_C6](https://micropython.org/download/ESP32_GENERIC_C6/). On an ESP32-C3, download
+   the [Qualithm image](https://github.com/qualithm/micropython-firmware/releases/latest) for the C3
+   instead: it has the SDK built in, which leaves the C3 enough memory for TLS. Flash it with
    [esptool](https://docs.espressif.com/projects/esptool/), naming the chip (`esp32s3`, `esp32c3` or
    `esp32c6`) and the `.bin` you downloaded:
 
@@ -130,6 +131,7 @@ code. The reference boards are the M5Stack AtomS3 Lite (S3), Stamp C3 (C3) and N
    If esptool can't connect, hold the board's boot button while you plug it in, then run it again.
 
 2. Join Wi-Fi, install the SDK and write the setup file, as steps 2 and 3 of the Pico 2 W guide do.
+   On the C3's Qualithm image, skip installing the SDK.
 
 3. Save this as `main.py`, copy it to the board and reset it:
 
