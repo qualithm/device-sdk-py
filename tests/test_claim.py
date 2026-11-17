@@ -20,6 +20,23 @@ class ClaimTest(unittest.TestCase):
             want = dict(case["credential"], issuedAt="2026-01-01T00:00:00.000Z")
             self.assertEqual(credential.to_dict(), want)
 
+    def test_keeps_the_zone_api_url_the_platform_names(self):
+        body = wire("claim")["cases"][1]["body"]
+        body["data"]["apiUrl"] = "https://api.test-sg-sin-a.qualithm.com/"
+        transport = FakeTransport({"/v1/provision/claim": Response(200, body)})
+        credential = claim(transport, "https://api.example.com", "qmc_x.y", JAN_1_2026)
+        self.assertEqual(credential.api_url, "https://api.test-sg-sin-a.qualithm.com")
+        self.assertEqual(credential.to_dict()["apiUrl"], "https://api.test-sg-sin-a.qualithm.com")
+
+    def test_drops_a_zone_api_url_that_is_not_an_https_origin(self):
+        for value in ("http://localhost:3000", "https://api.example.com/v1", None):
+            body = wire("claim")["cases"][1]["body"]
+            body["data"]["apiUrl"] = value
+            transport = FakeTransport({"/v1/provision/claim": Response(200, body)})
+            credential = claim(transport, "https://api.example.com", "qmc_x.y", JAN_1_2026)
+            self.assertIsNone(credential.api_url)
+            self.assertFalse("apiUrl" in credential.to_dict())
+
     def test_posts_the_code_and_name_to_the_claim_endpoint(self):
         body = wire("claim")["cases"][0]["body"]
         transport = FakeTransport({"/v1/provision/claim": Response(200, body)})
@@ -53,8 +70,11 @@ class ClaimTest(unittest.TestCase):
             claim(transport, "https://api.example.com", "qmc_x.y", JAN_1_2026)
         self.assertIsNone(caught.exception.status)
 
-    def test_rejects_a_response_missing_the_secret(self):
+    def test_rejects_a_response_missing_the_secret_with_its_status(self):
         body = {"data": {"deviceId": "d", "scopeId": "s", "teamId": "t"}}
         transport = FakeTransport({"/v1/provision/claim": Response(200, body)})
-        with self.assertRaises(ClaimError):
+        with self.assertRaises(ClaimError) as caught:
             claim(transport, "https://api.example.com", "qmc_x.y", JAN_1_2026)
+        self.assertEqual(str(caught.exception), "provisioning response has no secret")
+        # The endpoint answered, so the status isn't the None of an unreachable one.
+        self.assertEqual(caught.exception.status, 200)

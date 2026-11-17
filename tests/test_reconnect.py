@@ -13,6 +13,8 @@ from qualithm_device import (
 from qualithm_device._time import format_iso
 
 URL = "https://api.example.com"
+ZONE_API = "https://api.test-sg-sin-a.qualithm.com"
+RENEW = "/v1/provision/credentials/renew"
 T0 = 1767225600
 #: An 11-minute credential, as the dev proof mints.
 LIFETIME_S = 660
@@ -62,15 +64,24 @@ class Gateway(FakeTransport):
         self.refusals = 0
         #: The gateway a renewal names, if any.
         self.moved_to = ""
+        #: The zone API a renewal names, if any.
+        self.api_url = ""
+        #: How long a renewed token lives.
+        self.lifetime_s = LIFETIME_S
+        #: The clock reading at each renewal request.
+        self.requested_at = []
+        #: The clock reading at each session refused as unavailable.
+        self.refused_at = []
         #: Open sessions that take the manifest, then fail.
         self.flaky = False
 
     def request(self, method, url, headers, body):
         self.requests.append((method, url, headers, body))
+        self.requested_at.append(self.clock())
         if not self.renews:
             return 500, b"oops"
         secret = "qmd_%d" % len(self.expiry)
-        expires = self.clock() + LIFETIME_S
+        expires = self.clock() + self.lifetime_s
         self.expiry[secret] = expires
         body = {
             "success": True,
@@ -81,6 +92,8 @@ class Gateway(FakeTransport):
         }
         if self.moved_to:
             body["data"]["broker"] = {"host": self.moved_to, "port": 8883}
+        if self.api_url:
+            body["data"]["apiUrl"] = self.api_url
         return 201, json.dumps(body).encode()
 
     def open(self, host, port, client_id, username, password, key_pem, cert_pem, keepalive_s):  # noqa: PLR0917
@@ -88,6 +101,7 @@ class Gateway(FakeTransport):
             self.refusals -= 1
             raise OSError("connection refused")
         if host in self.unavailable_hosts:
+            self.refused_at.append(self.clock())
             raise GatewayUnavailableError("the gateway is unavailable (code 3)")
         if self.clock() >= self.expiry[password]:
             raise OSError("the gateway refused the request (code 5)")
@@ -110,6 +124,10 @@ class FlakySession(GatewaySession):
 
     def subscribe(self, topic_filter):
         raise OSError("link down")
+
+
+class DoneWatchingError(Exception):
+    """Ends a reconnect loop the test has watched for long enough."""
 
 
 def credential():
@@ -175,6 +193,14 @@ class QuickStartTest(unittest.TestCase):
         for session in self.gateway.sessions:
             self.assertEqual(self.topics(session)[0], "capabilities")
 
+    def test_renews_at_the_zone_api_each_renewal_names(self):
+        self.gateway.api_url = ZONE_API
+        self.run_loop(40)
+        self.assertEqual(self.readings(), 40)
+        urls = [url for _, url, _, _ in self.gateway.requests]
+        # The first renewal goes to the configured URL, each later one to the API the last named.
+        self.assertEqual(urls, [URL + RENEW] + [ZONE_API + RENEW] * 3)
+
     def test_reconnects_a_dropped_session_and_subscribes_again(self):
         seen = []
         self.device.on_command("power", seen.append)
@@ -236,7 +262,7 @@ class QuickStartTest(unittest.TestCase):
             self.device.poll()
 
     def test_follows_a_moved_gateway_on_reconnect(self):
-        self.clock.seconds += 3600  # old enough to renew early
+        self.clock.seconds += 900  # old enough to renew early
         self.gateway.expiry["qmd_0"] = T0 + 7200
         self.device.credential.expires_at = format_iso(T0 + 7200)
         self.gateway.moved_to = "gw2"
@@ -246,6 +272,49 @@ class QuickStartTest(unittest.TestCase):
         self.assertEqual(self.gateway.opened[-1]["host"], "gw2")
         self.assertEqual(self.device.credential.token, "qmd_1")
         self.assertEqual(self.slept, [])
+
+    def watch_refusals(self, minutes):
+        """Refuse every session as unavailable while the reconnect loop runs for `minutes`."""
+        # Day-long tokens, so no renewal falls due on time while the gateway refuses.
+        self.gateway.lifetime_s = 86400
+        self.gateway.expiry["qmd_0"] = T0 + 86400
+        self.device.credential.expires_at = format_iso(T0 + 86400)
+        self.gateway.unavailable_hosts = {"gw"}
+        self.gateway.sessions[-1].fail = True
+
+        def sleep(ms):
+            self.slept.append(ms)
+            if len(self.slept) == minutes:
+                raise DoneWatchingError
+            self.clock.seconds += 60
+
+        self.device._sleep_ms = sleep
+        with self.assertRaises(DoneWatchingError):
+            self.device.poll()
+
+    def test_renews_early_at_most_once_per_15_minutes_while_refused(self):
+        # The gateway stays down, and each renewal names it again.
+        self.gateway.moved_to = "gw"
+        self.clock.seconds += 900
+        self.watch_refusals(60)
+        start = T0 + 900
+        self.assertEqual(
+            self.gateway.requested_at, [start, start + 900, start + 1800, start + 2700]
+        )
+        self.assertEqual(self.device.credential.token, "qmd_4")
+        # Never straight back to the gateway that refused it: every refusal waits first.
+        self.assertEqual(len(self.gateway.refused_at), len(self.slept))
+        self.assertEqual(len(self.gateway.opened), 1)
+
+    def test_spaces_failed_early_renewals_15_minutes_apart(self):
+        self.gateway.renews = False
+        self.clock.seconds += 900
+        self.watch_refusals(60)
+        start = T0 + 900
+        self.assertEqual(
+            self.gateway.requested_at, [start, start + 900, start + 1800, start + 2700]
+        )
+        self.assertEqual(self.device.credential.token, "qmd_0")
 
 
 if __name__ == "__main__":

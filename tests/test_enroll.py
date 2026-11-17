@@ -37,6 +37,25 @@ class EnrollTest(unittest.TestCase):
             self.assertEqual(headers["authorization"], fixture["authorization"])
             self.assertEqual(sent, {"csrPem": "csr-for-d-1", "label": "lab", "expiresInDays": 30})
 
+    def test_takes_the_zone_api_url_from_the_response_or_keeps_the_claimed_one(self):
+        claimed_api = "https://api.test-sg-sin-a.qualithm.com"
+        for named, want in (
+            ("https://api.sg-sin-a.qualithm.com", "https://api.sg-sin-a.qualithm.com"),
+            (None, claimed_api),
+            ("http://localhost:3000", claimed_api),
+        ):
+            fixture = wire("enroll")
+            body = fixture["cases"][0]["body"]
+            if named is not None:
+                body["data"]["apiUrl"] = named
+            transport = FakeTransport({"/v1/provision/credentials/cert": Response(201, body)})
+            claimed = Credential.from_dict(dict(fixture["claimed"], apiUrl=claimed_api))
+            credential = enroll_certificate(
+                transport, FakeCrypto(), claimed_api, claimed, JAN_1_2026
+            )
+            self.assertEqual(credential.api_url, want)
+            self.assertEqual(credential.to_dict()["apiUrl"], want)
+
     def test_reports_the_platform_message(self):
         fixture = wire("enroll")
         for case in fixture["errors"]:
@@ -53,6 +72,17 @@ class EnrollTest(unittest.TestCase):
                     0,
                 )
             self.assertEqual(str(caught.exception), case["message"])
+
+    def test_rejects_a_response_missing_the_certificate_with_its_status(self):
+        fixture = wire("enroll")
+        body = fixture["cases"][0]["body"]
+        del body["data"]["certificatePem"]
+        transport = FakeTransport({"/v1/provision/credentials/cert": Response(201, body)})
+        claimed = Credential.from_dict(fixture["claimed"])
+        with self.assertRaises(EnrollError) as caught:
+            enroll_certificate(transport, FakeCrypto(), "https://x", claimed, JAN_1_2026)
+        self.assertEqual(str(caught.exception), "provisioning response has no certificatePem")
+        self.assertEqual(caught.exception.status, 201)
 
     def test_needs_a_token_credential(self):
         current = Credential.from_dict(wire("renew")["cert"]["current"])

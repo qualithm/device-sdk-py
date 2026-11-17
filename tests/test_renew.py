@@ -5,9 +5,31 @@ from device_fakes import FakeCrypto, FakeTransport, Response, wire
 from qualithm_device import Credential, CredentialError, RenewError, renew, renew_proof
 
 JAN_21_2026 = 1768953600
+OLD_API = "https://api.test-sg-sin-a.qualithm.com"
+NEW_API = "https://api.sg-sin-a.qualithm.com"
 
 
 class RenewTest(unittest.TestCase):
+    def renewed(self, kind, named):
+        """Renew the `kind` fixture, stored with OLD_API, when the response names `named`."""
+        case = wire("renew")[kind]
+        if named is not None:
+            case["body"]["data"]["apiUrl"] = named
+        transport = FakeTransport(
+            {"/v1/provision/credentials/renew": Response(case["status"], case["body"])}
+        )
+        current = Credential.from_dict(dict(case["current"], apiUrl=OLD_API))
+        return renew(transport, FakeCrypto(), OLD_API, current, JAN_21_2026)
+
+    def test_takes_the_zone_api_url_the_renewal_names(self):
+        for kind in ("token", "cert"):
+            self.assertEqual(self.renewed(kind, NEW_API + "/").api_url, NEW_API)
+
+    def test_keeps_the_zone_api_url_when_the_renewal_names_none(self):
+        for kind in ("token", "cert"):
+            self.assertEqual(self.renewed(kind, None).api_url, OLD_API)
+            self.assertEqual(self.renewed(kind, "http://localhost:3000").api_url, OLD_API)
+
     def test_renews_a_token_with_its_own_basic_auth(self):
         fixture = wire("renew")["token"]
         transport = FakeTransport(
@@ -75,6 +97,20 @@ class RenewTest(unittest.TestCase):
                     0,
                 )
             self.assertEqual(str(caught.exception), case["message"])
+            self.assertEqual(caught.exception.status, case["status"])
+
+    def test_rejects_a_response_missing_the_new_credential_with_its_status(self):
+        for kind, field in (("token", "secret"), ("cert", "certificatePem")):
+            case = wire("renew")[kind]
+            del case["body"]["data"][field]
+            transport = FakeTransport(
+                {"/v1/provision/credentials/renew": Response(case["status"], case["body"])}
+            )
+            current = Credential.from_dict(case["current"])
+            with self.assertRaises(RenewError) as caught:
+                renew(transport, FakeCrypto(), "https://x", current, JAN_21_2026)
+            self.assertEqual(str(caught.exception), "provisioning response has no " + field)
+            # The endpoint answered, so the status isn't the None of an unreachable one.
             self.assertEqual(caught.exception.status, case["status"])
 
     def test_refuses_a_kind_with_no_renewal(self):
