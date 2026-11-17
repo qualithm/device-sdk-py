@@ -61,6 +61,10 @@ class FakeTransport:
         self.sessions = []
         self.max_packet_size = max_packet_size
         self.unreachable = False
+        #: HTTPS hosts that fail as a DNS, TLS or connection failure does: with no HTTP response.
+        self.unreachable_hosts = set()
+        #: Answers for one host and path, ahead of `responses`.
+        self.host_responses = {}
         self.refuse = False
         self.unavailable_hosts = set()
 
@@ -68,11 +72,13 @@ class FakeTransport:
         self.requests.append(
             (method, url, headers, None if body is None else json.loads(body.decode()))
         )
-        if self.unreachable:
+        after_scheme = url.split("//", 1)[-1]
+        slash = after_scheme.index("/")
+        host = after_scheme[:slash].split(":")[0]
+        if self.unreachable or host in self.unreachable_hosts:
             raise OSError("ECONNREFUSED")
-        after_host = url.split("//", 1)[-1]
-        path = after_host[after_host.index("/") :]
-        response = self.responses[path]
+        path = after_scheme[slash:]
+        response = self.host_responses.get((host, path)) or self.responses[path]
         return response.status, response.raw
 
     def open(self, host, port, client_id, username, password, key_pem, cert_pem, keepalive_s):  # noqa: PLR0917

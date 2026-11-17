@@ -13,7 +13,8 @@ declares what the device can do.
 - **Claim once.** The single-use claim code is exchanged on first boot; every later boot loads the
   stored credential.
 - **Renewal on time.** A token or certificate credential renews two thirds of the way through its
-  lifetime, and a failed renewal keeps the device on its current credential.
+  lifetime, at the API of the device's zone. A failed renewal keeps the device on its current
+  credential.
 - **A session that stays up.** A renewal reopens the session on the new credential, and a dropped
   session reconnects with backoff, so the main loop has no reconnect code.
 - **Capabilities declared on every connect.** Dashboards and automations list what a device
@@ -300,6 +301,20 @@ reopens on it before the old one expires. When the session drops, the next `publ
 reconnects first, waiting `reconnect_delay(attempt)` milliseconds between refused attempts, then
 declares the capabilities and subscribes to its topics again. The loop needs no reconnect code of
 its own.
+
+Renewals go to the API of the device's zone. The platform names it at claim and at each renewal,
+and the SDK stores it with the credential. A credential without one, such as one an earlier SDK
+version stored, renews at the provisioning URL passed to `connect()`. When a renewal at the zone's
+API gets no HTTP response or a server error (5xx), as when its host doesn't resolve or its edge
+can't reach the zone, the SDK tries it once more at the provisioning URL. Any other HTTP error ends
+the attempt. The stored API wins over the provisioning URL, so to move a claimed device to another
+environment, claim it again.
+
+When a gateway answers that it is unavailable, the device may belong on another gateway. The SDK
+renews early to learn which, then connects there. Right after a claim, it renews at once. Otherwise
+it waits until the credential is 15 minutes old. Each early renewal is stored, so the wait holds
+across restarts. A device reconnecting on its own also waits 15 minutes after an early renewal that
+failed. A new `connect()` call doesn't know about that failure.
 
 Once the credential has expired, as when renewal kept failing until its expiry, a reconnect raises
 `CredentialError`: claim the device again.

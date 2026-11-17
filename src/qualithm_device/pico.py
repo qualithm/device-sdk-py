@@ -279,7 +279,9 @@ def connect(  # noqa: PLR0913 -- the core connect()'s options, by keyword
 
     Args:
         provisioning_url: The provisioning API for the claim code's environment, e.g.
-            `https://api.qualithm.com`.
+            `https://api.qualithm.com`. The claim goes there, and so does a renewal when the
+            platform has named no zone API or the zone API gives no HTTP response or a server
+            error (5xx).
         capabilities: The board's own capability declarations, declared after `SYSTEM_SENSORS`.
         claim_code: The single-use claim code, read only when nothing is stored.
         name: A human-friendly device name set at claim.

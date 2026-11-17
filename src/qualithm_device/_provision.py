@@ -3,7 +3,7 @@
 import binascii
 import json
 
-from qualithm_device._credential import CERT, TOKEN, Credential, parse_broker
+from qualithm_device._credential import CERT, TOKEN, Credential, parse_api_url, parse_broker
 from qualithm_device._errors import ClaimError, CredentialError, EnrollError, RenewError
 from qualithm_device._time import format_iso
 
@@ -38,8 +38,8 @@ def _post(  # noqa: PLR0913, PLR0917 -- the request's parts, and how to report a
     body: "dict[str, object] | None",
     error: "ErrorType",
     what: str,
-) -> "dict[str, object]":
-    """POST JSON and return the envelope's `data`, or raise `error` with the platform's message."""
+) -> "tuple[int, dict[str, object]]":
+    """POST JSON and return the status and the envelope's `data`, or raise `error` on failure."""
     # Built up rather than unpacked: MicroPython has no `**` in a dict display.
     sent = {"content-type": "application/json"}
     for key, value in headers.items():
@@ -58,13 +58,14 @@ def _post(  # noqa: PLR0913, PLR0917 -- the request's parts, and how to report a
         message = envelope.get("message") if isinstance(envelope, dict) else None  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] -- JSON
         text = message if isinstance(message, str) else f"{what} failed with status {status}"
         raise error(text, status)
-    return data  # pyright: ignore[reportUnknownVariableType] -- JSON
+    return status, data  # pyright: ignore[reportUnknownVariableType] -- JSON
 
 
-def _field(data: "dict[str, object]", key: str, error: "ErrorType") -> str:
+def _field(data: "dict[str, object]", key: str, error: "ErrorType", status: int) -> str:
     value = data.get(key)
     if not isinstance(value, str) or not value:
-        raise error(f"provisioning response has no {key}")
+        # With the answer's status, so a status of None still means the endpoint wasn't reached.
+        raise error(f"provisioning response has no {key}", status)
     return value
 
 
@@ -99,7 +100,8 @@ def claim(  # noqa: PLR0913 -- the request's fields, plus the injected transport
         body["name"] = name
     if virtual:
         body["virtual"] = True
-    data = _post(transport, _url(provisioning_url, CLAIM_PATH), {}, body, ClaimError, "claim")
+    url = _url(provisioning_url, CLAIM_PATH)
+    status, data = _post(transport, url, {}, body, ClaimError, "claim")
     issued = data.get("credential")
     kind = TOKEN
     expires_at = None
@@ -109,14 +111,15 @@ def claim(  # noqa: PLR0913 -- the request's fields, plus the injected transport
         kind = issued_kind if isinstance(issued_kind, str) else TOKEN
         expires_at = issued_expiry if isinstance(issued_expiry, str) else None
     return Credential(
-        device_id=_field(data, "deviceId", ClaimError),
-        team_id=_field(data, "teamId", ClaimError),
-        scope_id=_field(data, "scopeId", ClaimError),
+        device_id=_field(data, "deviceId", ClaimError, status),
+        team_id=_field(data, "teamId", ClaimError, status),
+        scope_id=_field(data, "scopeId", ClaimError, status),
         kind=kind,
-        token=_field(data, "secret", ClaimError),
+        token=_field(data, "secret", ClaimError, status),
         issued_at=format_iso(now),
         expires_at=expires_at,
         broker=parse_broker(data.get("broker")),
+        api_url=parse_api_url(data.get("apiUrl")),
     )
 
 
@@ -137,7 +140,10 @@ def enroll_certificate(  # noqa: PLR0913 -- the request, plus the injected trans
     Args:
         transport: The board's HTTPS client.
         crypto: Makes the key and CSR.
-        provisioning_url: The provisioning API's base URL.
+        provisioning_url: The API's base URL: the provisioning URL, or the zone API
+            `resolve_api_url` chooses for the credential. The provisioning URL forwards to the
+            device's zone, so try it when the zone API gives no HTTP response or a server error
+            (5xx).
         credential: The device's token credential.
         now: The current Unix time.
         label: A label for the issued certificate.
@@ -159,18 +165,20 @@ def enroll_certificate(  # noqa: PLR0913 -- the request, plus the injected trans
         body["expiresInDays"] = expires_in_days
     headers = {"authorization": _basic(credential)}
     url = _url(provisioning_url, CERT_PATH)
-    data = _post(transport, url, headers, body, EnrollError, "enrollment")
+    status, data = _post(transport, url, headers, body, EnrollError, "enrollment")
     return Credential(
         device_id=credential.device_id,
         team_id=credential.team_id,
         scope_id=credential.scope_id,
         kind=CERT,
         private_key_pem=private_key_pem,
-        certificate_pem=_field(data, "certificatePem", EnrollError),
-        ca_certificate_pem=_field(data, "caCertificatePem", EnrollError),
+        certificate_pem=_field(data, "certificatePem", EnrollError, status),
+        ca_certificate_pem=_field(data, "caCertificatePem", EnrollError, status),
         issued_at=format_iso(now),
-        # The platform names the broker again at enrollment; keep the claimed one if it doesn't.
+        # The platform names the broker and API again at enrollment; keep the claimed ones if it
+        # doesn't.
         broker=parse_broker(data.get("broker")) or credential.broker,
+        api_url=parse_api_url(data.get("apiUrl")) or credential.api_url,
     )
 
 
@@ -203,7 +211,10 @@ def renew(
     Args:
         transport: The board's HTTPS client.
         crypto: Makes the new key and signs the proof; used for a certificate only.
-        provisioning_url: The provisioning API's base URL.
+        provisioning_url: The API's base URL: the provisioning URL, or the zone API
+            `resolve_api_url` chooses for the credential. The provisioning URL forwards to the
+            device's zone, so try it when the zone API gives no HTTP response or a server error
+            (5xx).
         credential: The current credential.
         now: The current Unix time.
 
@@ -217,7 +228,7 @@ def renew(
     """
     url = _url(provisioning_url, RENEW_PATH)
     if credential.kind == TOKEN:
-        data = _post(
+        status, data = _post(
             transport, url, {"authorization": _basic(credential)}, None, RenewError, "renewal"
         )
         return Credential(
@@ -225,11 +236,12 @@ def renew(
             team_id=credential.team_id,
             scope_id=credential.scope_id,
             kind=TOKEN,
-            token=_field(data, "secret", RenewError),
+            token=_field(data, "secret", RenewError, status),
             issued_at=format_iso(now),
             expires_at=_renewed_expiry(data),
-            # The gateway the device belongs on now, which may have moved since the last one.
+            # The gateway and API the device belongs on now, which may have moved since the last.
             broker=parse_broker(data.get("broker")) or credential.broker,
+            api_url=parse_api_url(data.get("apiUrl")) or credential.api_url,
         )
     if credential.kind != CERT or not credential.private_key_pem or not credential.certificate_pem:
         raise CredentialError(f"a {credential.kind} credential has no renewal")
@@ -242,18 +254,19 @@ def renew(
         "signedAt": signed_at,
         "signature": binascii.b2a_base64(signature).decode().strip(),
     }
-    data = _post(transport, url, {}, body, RenewError, "renewal")
+    status, data = _post(transport, url, {}, body, RenewError, "renewal")
     return Credential(
         device_id=credential.device_id,
         team_id=credential.team_id,
         scope_id=credential.scope_id,
         kind=CERT,
         private_key_pem=private_key_pem,
-        certificate_pem=_field(data, "certificatePem", RenewError),
-        ca_certificate_pem=_field(data, "caCertificatePem", RenewError),
+        certificate_pem=_field(data, "certificatePem", RenewError, status),
+        ca_certificate_pem=_field(data, "caCertificatePem", RenewError, status),
         issued_at=signed_at,
         expires_at=_renewed_expiry(data),
         broker=parse_broker(data.get("broker")) or credential.broker,
+        api_url=parse_api_url(data.get("apiUrl")) or credential.api_url,
     )
 
 
