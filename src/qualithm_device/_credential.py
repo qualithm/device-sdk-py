@@ -1,4 +1,4 @@
-"""The device credential and the broker it names, in device-sdk-js's wire shape."""
+"""The device credential and the broker and API it names, in device-sdk-js's wire shape."""
 
 from qualithm_device._errors import CredentialError
 from qualithm_device._time import parse_iso
@@ -8,6 +8,12 @@ MAX_PORT = 65_535
 
 TOKEN = "token"  # noqa: S105 -- a credential kind, not a secret
 CERT = "cert"
+
+_HTTPS = "https://"
+_HTTPS_PORT = 443
+#: The characters a host in an API URL may hold.
+_HOST_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-"
+_DIGITS = "0123456789"
 
 
 class Broker:
@@ -59,6 +65,40 @@ def parse_broker(value: object) -> "Broker | None":
     return Broker(host, port)
 
 
+def parse_api_url(value: object) -> "str | None":
+    """Read the zone API URL a provisioning response carries.
+
+    The device sends its credential there, so only an https origin is trusted: a host and an
+    optional port, followed by at most one slash. An older platform omits it and local development
+    sends an http one; either leaves the device renewing where it already does.
+
+    Args:
+        value: The response's `apiUrl` field.
+
+    Returns:
+        The origin as `https://host[:port]`, with a lowercase host and no default port, or None
+        when absent or not an https origin.
+    """
+    if not isinstance(value, str) or not value.startswith(_HTTPS):
+        return None
+    authority = value[len(_HTTPS) :]
+    if authority.endswith("/"):
+        authority = authority[:-1]
+    host, colon, port = authority.partition(":")
+    if not host or not all(char in _HOST_CHARS for char in host):
+        return None
+    host = host.lower()
+    if not colon:
+        return _HTTPS + host
+    # Bounded before int(), so a long run of digits never builds a big integer on a board.
+    if not port or len(port) > len(str(MAX_PORT)) or not all(char in _DIGITS for char in port):
+        return None
+    number = int(port)
+    if not 1 <= number <= MAX_PORT:
+        return None
+    return _HTTPS + host if number == _HTTPS_PORT else _HTTPS + host + ":" + str(number)
+
+
 def _string(data: "dict[str, object]", key: str, required: bool = True) -> "str | None":
     value = data.get(key)
     if value is None and not required:
@@ -72,7 +112,8 @@ class Credential:
     """A device credential, persisted so a restart reconnects without claiming again.
 
     The token kind carries `token`; the cert kind carries `private_key_pem`, `certificate_pem` and
-    `ca_certificate_pem`. Times are ISO-8601 strings, as the platform and device-sdk-js write them.
+    `ca_certificate_pem`. `broker` and `api_url` are the gateway and the zone API the platform
+    named. Times are ISO-8601 strings, as the platform and device-sdk-js write them.
     """
 
     def __init__(  # noqa: PLR0913 -- one argument per wire field
@@ -89,6 +130,7 @@ class Credential:
         ca_certificate_pem: "str | None" = None,
         expires_at: "str | None" = None,
         broker: "Broker | None" = None,
+        api_url: "str | None" = None,
     ) -> None:
         """Hold the credential's fields."""
         self.device_id = device_id
@@ -102,6 +144,7 @@ class Credential:
         self.ca_certificate_pem = ca_certificate_pem
         self.expires_at = expires_at
         self.broker = broker
+        self.api_url = api_url
 
     def to_dict(self) -> "dict[str, object]":
         """The credential in device-sdk-js's stored shape, unset fields left out."""
@@ -118,6 +161,7 @@ class Credential:
             ("certificatePem", self.certificate_pem),
             ("caCertificatePem", self.ca_certificate_pem),
             ("expiresAt", self.expires_at),
+            ("apiUrl", self.api_url),
         )
         for key, value in optional:
             if value is not None:
@@ -152,6 +196,9 @@ class Credential:
             ca_certificate_pem=_string(data, "caCertificatePem", required=False),
             expires_at=_string(data, "expiresAt", required=False),
             broker=parse_broker(data.get("broker")),
+            # Read leniently, as `broker` is: a malformed one leaves the device renewing where it
+            # was configured to.
+            api_url=parse_api_url(data.get("apiUrl")),
         )
         credential.check()
         return credential

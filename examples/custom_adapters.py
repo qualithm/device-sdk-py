@@ -43,6 +43,7 @@ class ScriptedTransport:
             "scopeId": "scope-1",
             "secret": "qmd_example",
             "broker": {"host": "gw.example.com", "port": 8883},
+            "apiUrl": "https://api.zone-a.example.com",
         }
         return 200, json.dumps({"data": data}).encode()
 

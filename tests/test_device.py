@@ -11,15 +11,21 @@ from qualithm_device import (
     PayloadTooLargeError,
     TooManyMetricsError,
     TopicError,
+    format_iso,
     renew_due,
+    resolve_api_url,
     resolve_broker,
 )
 from qualithm_device import connect as connect_with
 
 URL = "https://api.example.com"
+ZONE_API = "https://api.test-sg-sin-a.qualithm.com"
+CLAIM = "/v1/provision/claim"
+RENEW = "/v1/provision/credentials/renew"
 JAN_1_2026 = 1767225600
 JAN_21_2026 = 1768953600
 FEB_1_2026 = 1769904000
+MAR_1_2026 = 1772323200
 
 TEMPERATURE = {"key": "temperature", "type": "sensor", "metric": "temperature", "unit": "celsius"}
 
@@ -110,6 +116,8 @@ class ConnectTest(unittest.TestCase):
         self.assertEqual(store.saves[-1]["token"], "qmd_new")
         self.assertEqual(transport.opened[0]["password"], "qmd_new")
         self.assertIsNone(device.renew_error)
+        # The stored credential names no zone API, so it renews where it was configured to.
+        self.assertEqual(transport.requests[0][1], URL + RENEW)
 
     def test_connects_on_the_old_credential_when_renewal_fails(self):
         fixture = wire("renew")
@@ -178,8 +186,110 @@ class ConnectTest(unittest.TestCase):
             connect(URL, transport, MemoryStore(), claim_code="qmc_x.y", now=clock(JAN_1_2026))
 
 
+def urls(transport):
+    """The URL of each HTTPS request, in order."""
+    return [request[1] for request in transport.requests]
+
+
+class ZoneApiTest(unittest.TestCase):
+    def due(self, api_url, response=None):
+        """A transport and store whose token, naming `api_url`, is due to renew on JAN_21_2026."""
+        fixture = wire("renew")["token"]
+        stored = dict(fixture["current"])
+        if api_url is not None:
+            stored["apiUrl"] = api_url
+        if response is None:
+            response = Response(fixture["status"], fixture["body"])
+        return FakeTransport({RENEW: response}), MemoryStore(stored)
+
+    def test_renews_at_the_stored_zone_api(self):
+        transport, store = self.due(ZONE_API)
+        device = connect(URL, transport, store, broker_host="gw", now=clock(JAN_21_2026))
+        self.assertEqual(urls(transport), [ZONE_API + RENEW])
+        self.assertEqual(device.credential.token, "qmd_new")
+        # The renewal named no API, so the stored one stays.
+        self.assertEqual(store.saves[-1]["apiUrl"], ZONE_API)
+
+    def test_falls_back_to_the_provisioning_url_when_the_zone_api_does_not_answer(self):
+        body = wire("renew")["token"]["body"]
+        body["data"]["apiUrl"] = "https://api.sg-sin-a.qualithm.com"
+        transport, store = self.due(ZONE_API, Response(201, body))
+        transport.unreachable_hosts.add("api.test-sg-sin-a.qualithm.com")
+        device = connect(URL, transport, store, broker_host="gw", now=clock(JAN_21_2026))
+        self.assertEqual(urls(transport), [ZONE_API + RENEW, URL + RENEW])
+        self.assertEqual(device.credential.token, "qmd_new")
+        self.assertIsNone(device.renew_error)
+        # The answer through the provisioning URL names the zone API to use from now on.
+        self.assertEqual(store.saves[-1]["apiUrl"], "https://api.sg-sin-a.qualithm.com")
+
+    def test_falls_back_to_the_provisioning_url_on_a_server_error_from_the_zone_api(self):
+        # An edge in front of an unreachable zone answers with its own error page.
+        for status in (500, 503, 530):
+            transport, store = self.due(ZONE_API)
+            transport.host_responses[("api.test-sg-sin-a.qualithm.com", RENEW)] = Response(
+                status, raw=b"<html>error 1033</html>"
+            )
+            device = connect(URL, transport, store, broker_host="gw", now=clock(JAN_21_2026))
+            self.assertEqual(urls(transport), [ZONE_API + RENEW, URL + RENEW])
+            self.assertEqual(device.credential.token, "qmd_new")
+            self.assertIsNone(device.renew_error)
+
+    def test_keeps_the_provisioning_url_error_when_both_fail(self):
+        transport, store = self.due(ZONE_API, Response(503, raw=b"<html>busy</html>"))
+        transport.host_responses[("api.test-sg-sin-a.qualithm.com", RENEW)] = Response(
+            530, raw=b"<html>error 1033</html>"
+        )
+        device = connect(URL, transport, store, broker_host="gw", now=clock(JAN_21_2026))
+        self.assertEqual(urls(transport), [ZONE_API + RENEW, URL + RENEW])
+        assert device.renew_error is not None
+        self.assertEqual(device.renew_error.status, 503)
+        self.assertEqual(store.saves, [])
+
+    def test_tries_once_when_the_provisioning_url_spells_the_zone_api_another_way(self):
+        transport, store = self.due(ZONE_API, Response(503, raw=b"<html>busy</html>"))
+        spelled = "https://API.test-sg-sin-a.qualithm.com:443/"
+        device = connect(spelled, transport, store, broker_host="gw", now=clock(JAN_21_2026))
+        self.assertEqual(urls(transport), [ZONE_API + RENEW])
+        assert device.renew_error is not None
+        self.assertEqual(device.renew_error.status, 503)
+
+    def test_keeps_a_client_error_from_the_zone_api(self):
+        for response in (
+            Response(429, wire("renew")["errors"][2]["body"]),
+            Response(401, raw=b'{"error": {"code": "unauthorized"}}'),
+        ):
+            transport, store = self.due(ZONE_API, response)
+            device = connect(URL, transport, store, broker_host="gw", now=clock(JAN_21_2026))
+            self.assertEqual(urls(transport), [ZONE_API + RENEW])
+            assert device.renew_error is not None
+            self.assertEqual(device.renew_error.status, response.status)
+            self.assertEqual(store.saves, [])
+
+    def test_keeps_an_answer_missing_its_secret_from_the_zone_api(self):
+        body = wire("renew")["token"]["body"]
+        del body["data"]["secret"]
+        transport, store = self.due(ZONE_API, Response(201, body))
+        device = connect(URL, transport, store, broker_host="gw", now=clock(JAN_21_2026))
+        # Answered, so not tried again at the provisioning URL.
+        self.assertEqual(urls(transport), [ZONE_API + RENEW])
+        assert device.renew_error is not None
+        self.assertEqual(device.renew_error.status, 201)
+        self.assertEqual(store.saves, [])
+        self.assertEqual(transport.opened[0]["password"], "qmd_abc")
+
+    def test_tries_an_unanswered_provisioning_url_once(self):
+        for api_url in (None, URL):
+            transport, store = self.due(api_url)
+            transport.unreachable = True
+            device = connect(URL + "/", transport, store, broker_host="gw", now=clock(JAN_21_2026))
+            self.assertEqual(len(transport.requests), 1)
+            assert device.renew_error is not None
+            self.assertIsNone(device.renew_error.status)
+
+
 JAN_2_2026 = JAN_1_2026 + 86400
 HOME = {"host": "gw.test-de-fra-a.qualithm.com", "port": 8883}
+REFUSING = {"host": "gw.test-sg-sin-a.qualithm.com", "port": 8883}
 
 
 def renewal_naming(broker):
@@ -194,11 +304,31 @@ def renewal_naming(broker):
 class MovedGatewayTest(unittest.TestCase):
     def moved_transport(self, broker=HOME):
         fixture, response = renewal_naming(broker)
-        transport = FakeTransport({"/v1/provision/credentials/renew": response})
-        transport.unavailable_hosts.add("gw.test-sg-sin-a.qualithm.com")
+        transport = FakeTransport({RENEW: response})
+        transport.unavailable_hosts.add(REFUSING["host"])
         stored = dict(fixture["current"])
-        stored["broker"] = {"host": "gw.test-sg-sin-a.qualithm.com", "port": 8883}
+        stored["broker"] = REFUSING
         return transport, MemoryStore(stored)
+
+    def test_follows_a_refusal_at_once_right_after_its_claim(self):
+        claimed = wire("claim")["cases"][2]["body"]  # a credential that expires, so it renews
+        claimed["data"]["broker"] = REFUSING
+        claimed["data"]["apiUrl"] = ZONE_API
+        _, renewal = renewal_naming(HOME)
+        transport = FakeTransport({CLAIM: Response(200, claimed), RENEW: renewal})
+        transport.unavailable_hosts.add(REFUSING["host"])
+        store = MemoryStore()
+        device = connect(URL, transport, store, claim_code="qmc_x.y", now=clock(JAN_1_2026))
+        # One renewal, at the zone API the claim named, within the same second as the claim.
+        self.assertEqual(urls(transport), [URL + CLAIM, ZONE_API + RENEW])
+        self.assertEqual(
+            [opened["host"] for opened in transport.opened], [REFUSING["host"], HOME["host"]]
+        )
+        self.assertEqual(transport.opened[-1]["password"], "qmd_new")
+        self.assertEqual(store.saves[-1]["broker"], HOME)
+        self.assertEqual(store.saves[-1]["issuedAt"], format_iso(JAN_1_2026))
+        assert device.credential.broker is not None
+        self.assertEqual(device.credential.broker.to_dict(), HOME)
 
     def test_renews_early_and_connects_to_the_gateway_it_names(self):
         transport, store = self.moved_transport()
@@ -222,23 +352,42 @@ class MovedGatewayTest(unittest.TestCase):
         self.assertEqual(transport.opened[-1]["host"], HOME["host"])
 
     def test_reports_the_refusal_when_the_gateway_has_not_moved(self):
-        transport, store = self.moved_transport(
-            {"host": "gw.test-sg-sin-a.qualithm.com", "port": 8883}
-        )
+        transport, store = self.moved_transport(REFUSING)
         with self.assertRaises(GatewayError):
             connect(URL, transport, store, now=clock(JAN_2_2026))
         self.assertEqual(len(transport.opened), 1)
+        # Stored all the same, so the next boot waits before renewing early again.
+        self.assertEqual(store.saves[-1]["token"], "qmd_new")
+        self.assertEqual(store.saves[-1]["issuedAt"], format_iso(JAN_2_2026))
 
     def test_reports_the_refusal_when_renewal_names_no_gateway(self):
         transport, store = self.moved_transport(None)
         with self.assertRaises(GatewayError):
             connect(URL, transport, store, now=clock(JAN_2_2026))
 
-    def test_does_not_renew_a_credential_issued_within_the_hour(self):
+    def test_does_not_renew_early_within_15_minutes_of_the_last_renewal(self):
         transport, store = self.moved_transport()
         with self.assertRaises(GatewayError):
-            connect(URL, transport, store, now=clock(JAN_1_2026 + 60))
+            connect(URL, transport, store, now=clock(JAN_1_2026 + 899))
         self.assertEqual(transport.requests, [])
+
+    def test_renews_early_once_15_minutes_have_passed(self):
+        transport, store = self.moved_transport()
+        connect(URL, transport, store, now=clock(JAN_1_2026 + 900))
+        self.assertEqual(urls(transport), [URL + RENEW])
+        self.assertEqual(transport.opened[-1]["host"], HOME["host"])
+
+    def test_renews_early_at_most_4_times_an_hour_across_connects(self):
+        # The gateway stays down, and each renewal names it again.
+        transport, store = self.moved_transport(REFUSING)
+        for minute in range(60):
+            with self.assertRaises(GatewayError):
+                connect(URL, transport, store, now=clock(JAN_2_2026 + minute * 60))
+        self.assertEqual(len(transport.requests), 4)
+        self.assertEqual(
+            [save["issuedAt"] for save in store.saves],
+            [format_iso(JAN_2_2026 + offset) for offset in (0, 900, 1800, 2700)],
+        )
 
     def test_reports_the_refusal_when_renewal_fails(self):
         transport, store = self.moved_transport()
@@ -279,6 +428,14 @@ class BrokerChoiceTest(unittest.TestCase):
         credential.broker = None
         with self.assertRaises(GatewayError):
             resolve_broker(None, None, credential)
+
+
+class ApiChoiceTest(unittest.TestCase):
+    def test_prefers_the_stored_zone_api_to_the_configured_url(self):
+        credential = Credential.from_dict(wire("renew")["token"]["current"])
+        self.assertEqual(resolve_api_url(URL, credential), URL)
+        credential.api_url = ZONE_API
+        self.assertEqual(resolve_api_url(URL, credential), ZONE_API)
 
 
 class RenewDueTest(unittest.TestCase):
@@ -442,6 +599,16 @@ class RenewIfDueTest(unittest.TestCase):
         self.assertTrue(device.renew_if_due())
         self.assertEqual(store.saves[-1]["token"], "qmd_new")
         self.assertEqual(device.credential.token, "qmd_new")
+
+    def test_renews_at_the_zone_api_its_last_renewal_named(self):
+        fixture = wire("renew")["token"]
+        fixture["body"]["data"]["apiUrl"] = ZONE_API
+        device, store = self.connected({RENEW: Response(201, fixture["body"])}, JAN_21_2026)
+        self.assertTrue(device.renew_if_due())
+        self.assertEqual(store.saves[-1]["apiUrl"], ZONE_API)
+        device._now = clock(MAR_1_2026)
+        self.assertTrue(device.renew_if_due())
+        self.assertEqual(urls(device._transport), [URL + RENEW, ZONE_API + RENEW])
 
     def test_does_nothing_before_it_is_due(self):
         device, store = self.connected({}, JAN_1_2026)

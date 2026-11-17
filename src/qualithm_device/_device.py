@@ -5,7 +5,7 @@ import time
 
 from qualithm_device._backoff import reconnect_delay
 from qualithm_device._capability import build_manifest, fits_declaration
-from qualithm_device._credential import CERT, Broker, Credential
+from qualithm_device._credential import CERT, Broker, Credential, parse_api_url
 from qualithm_device._errors import (
     CapabilityError,
     CredentialError,
@@ -44,9 +44,16 @@ DEFAULT_PORT = 8883
 DEFAULT_KEEPALIVE_S = 60
 #: How far through its lifetime a credential renews: early enough to retry, late enough to be rare.
 RENEW_AT_FRACTION = 2 / 3
-#: How old a credential must be before an unavailable gateway renews it early to look for a moved
-#: one, so a gateway that is only down doesn't issue a credential on every connect.
-MOVED_RENEW_AFTER_S = 3600
+#: The least time between early renewals after a gateway refuses the session as unavailable, which
+#: is how a device learns the gateway it belongs on. Counted from the credential's issue: every
+#: early renewal that works is stored, so a gateway that stays down keeps the device under the
+#: platform's hourly renewal limit, restarts included. A Device also counts from its own last
+#: attempt, failed or not, which a new connect() doesn't know of. Right after a claim the device
+#: renews at once.
+MOVED_RENEW_EVERY_S = 900
+#: The first server error status. A zone API that answers one, or doesn't answer, is retried once
+#: at the provisioning URL, which forwards to the device's zone.
+SERVER_ERROR = 500
 
 
 def resolve_broker(host: "str | None", port: "int | None", credential: Credential) -> Broker:
@@ -70,6 +77,22 @@ def resolve_broker(host: "str | None", port: "int | None", credential: Credentia
     raise GatewayError(
         "no broker host is configured and the stored credential has none from enrollment"
     )
+
+
+def resolve_api_url(provisioning_url: str, credential: Credential) -> str:
+    """Choose where the device renews: the zone API the platform named, else `provisioning_url`.
+
+    The reverse of `resolve_broker`'s order: a stored API URL outranks the configured one, so a
+    claimed device moves to another environment only by claiming it again.
+
+    Args:
+        provisioning_url: The configured provisioning API, which the claim went to.
+        credential: The stored credential, carrying the API URL from claim, enrollment or renewal.
+
+    Returns:
+        The API's base URL.
+    """
+    return credential.api_url or provisioning_url
 
 
 def renew_due(credential: Credential, now: float) -> bool:
@@ -132,6 +155,8 @@ class Device:
         self._broker = broker
         self._broker_host = broker_host
         self._broker_port = broker_port
+        #: When the last early renewal after an unavailable gateway ran, whether or not it worked.
+        self._moved_tried_at: float | None = None
         self._keepalive_s = keepalive_s
         self._sleep_ms = _sleep_ms if sleep_ms is None else sleep_ms
         self._handlers: dict[str, CommandHandler] = {}
@@ -183,27 +208,42 @@ class Device:
             try:
                 return self._resume(broker)
             except GatewayUnavailableError:
-                moved = _renew_for_moved_gateway(
-                    self.credential,
-                    self._transport,
-                    self._crypto,
-                    self._provisioning_url,
-                    self._now(),
-                    broker,
-                )
-                if moved is not None:
-                    self._store.save(moved.to_dict())
-                    self.credential = moved
-                    self.renew_error = None
-                    self._broker = moved.broker
-                    if not followed:
-                        # Straight to the gateway renewal named, once.
-                        followed = True
-                        continue
+                if self._follow_moved_gateway(broker) and not followed:
+                    # Straight to the gateway renewal named, once.
+                    followed = True
+                    continue
             except OSError:
                 pass
             attempt += 1
             self._sleep_ms(reconnect_delay(attempt))
+
+    def _follow_moved_gateway(self, refused: Broker) -> bool:
+        """Renew early after `refused` turned the session away as unavailable.
+
+        Returns:
+            True when the renewal names another gateway, which `_broker` now holds.
+        """
+        now = self._now()
+        renewed = _renew_for_moved_gateway(
+            self.credential,
+            self._transport,
+            self._crypto,
+            self._store,
+            self._provisioning_url,
+            now,
+            tried_at=self._moved_tried_at,
+        )
+        if renewed is None:
+            return False
+        self._moved_tried_at = now
+        if isinstance(renewed, RenewError):
+            return False
+        self.credential = renewed
+        self.renew_error = None
+        if renewed.broker is None or renewed.broker == refused:
+            return False
+        self._broker = renewed.broker
+        return True
 
     def _resume(self, broker: Broker) -> "Session":
         """Open a session at `broker`, then publish the capabilities and subscribe again."""
@@ -477,29 +517,33 @@ def _renew_for_moved_gateway(  # noqa: PLR0913, PLR0917 -- what connect() holds,
     credential: Credential,
     transport: "Transport",
     crypto: "Crypto | None",
+    store: "Store",
     provisioning_url: str,
     now: float,
-    tried: Broker,
-) -> "Credential | None":
-    """Renew early after an unavailable gateway, to learn whether the device's gateway moved.
+    *,
+    tried_at: "float | None" = None,
+    claimed: bool = False,
+) -> "Credential | RenewError | None":
+    """Renew early after an unavailable gateway, to learn the gateway the device belongs on.
+
+    The renewal is stored whichever gateway it names, so the wait before the next early one holds
+    across restarts.
 
     Returns:
-        The renewed credential when it names another gateway, or None when the credential is too
-        new to renew early, renewal failed, or the gateway hasn't moved.
+        The stored renewal; the renewal's error; or None when `MOVED_RENEW_EVERY_S` hasn't passed
+        since the credential's issue and `tried_at`, the last early attempt. A device `claimed`
+        just now renews at once.
     """
     from qualithm_device._time import parse_iso  # noqa: PLC0415 -- only after a refusal
 
-    if now < parse_iso(credential.issued_at) + MOVED_RENEW_AFTER_S:
+    since = parse_iso(credential.issued_at)
+    if tried_at is not None and tried_at > since:
+        since = tried_at
+    if not claimed and now < since + MOVED_RENEW_EVERY_S:
         return None
-    if credential.kind == CERT and crypto is None:
-        return None
-    try:
-        renewed = renew(transport, crypto, provisioning_url, credential, now)  # pyright: ignore[reportArgumentType] -- crypto is only read for a certificate
-    except RenewError:
-        return None
-    moved = renewed.broker
-    if moved is None or (moved.host == tried.host and moved.port == tried.port):
-        return None
+    renewed = _renew_now(credential, transport, crypto, provisioning_url, now)
+    if isinstance(renewed, Credential):
+        store.save(renewed.to_dict())
     return renewed
 
 
@@ -510,15 +554,57 @@ def _try_renew(
     provisioning_url: str,
     now: float,
 ) -> "Credential | RenewError | None":
-    """The renewed credential, the renewal's error, or None when renewal isn't due or possible."""
+    """The renewed credential, the renewal's error, or None when renewal isn't due."""
     if not renew_due(credential, now):
         return None
+    return _renew_now(credential, transport, crypto, provisioning_url, now)
+
+
+def _renew_now(
+    credential: Credential,
+    transport: "Transport",
+    crypto: "Crypto | None",
+    provisioning_url: str,
+    now: float,
+) -> "Credential | RenewError":
+    """The renewed credential, or the renewal's error."""
     if credential.kind == CERT and crypto is None:
         return RenewError("a certificate credential needs crypto to renew")
     try:
-        return renew(transport, crypto, provisioning_url, credential, now)  # pyright: ignore[reportArgumentType] -- crypto is only read for a certificate
+        return _renew_at(transport, crypto, provisioning_url, credential, now)  # pyright: ignore[reportArgumentType] -- crypto is only read for a certificate
     except RenewError as err:
         return err
+
+
+def _renew_at(
+    transport: "Transport",
+    crypto: "Crypto",
+    provisioning_url: str,
+    credential: Credential,
+    now: float,
+) -> Credential:
+    """Renew at the API `resolve_api_url` chooses.
+
+    A renewal that gets no HTTP response or a server error (5xx) at a learned zone API is tried
+    once more at `provisioning_url`, which forwards it to the device's zone. Any other HTTP status
+    ends the attempt.
+
+    Raises:
+        RenewError: The renewal failed.
+    """
+    api_url = resolve_api_url(provisioning_url, credential)
+    try:
+        return renew(transport, crypto, api_url, credential, now)
+    except RenewError as err:
+        answered = err.status is not None and err.status < SERVER_ERROR
+        if answered or _origin(api_url) == _origin(provisioning_url):
+            raise
+    return renew(transport, crypto, provisioning_url, credential, now)
+
+
+def _origin(url: str) -> str:
+    """`url` as `parse_api_url` normalizes an https origin, else without its trailing slash."""
+    return parse_api_url(url) or url.rstrip("/")
 
 
 def connect(  # noqa: PLR0913 -- the hero API takes every option by keyword
@@ -543,9 +629,15 @@ def connect(  # noqa: PLR0913 -- the hero API takes every option by keyword
     manifest to the reserved `capabilities` topic, so dashboards and automations list what the
     device declares.
 
+    A gateway that refuses the session as unavailable sends the device to another one: the device
+    renews early to learn which, at once right after a claim and otherwise once the credential is
+    `MOVED_RENEW_EVERY_S` old.
+
     Args:
         provisioning_url: The provisioning API for the claim code's environment, e.g.
-            `https://api.qualithm.com`.
+            `https://api.qualithm.com`. The claim goes there, and so does a renewal when the
+            platform has named no zone API or the zone API gives no HTTP response or a server
+            error (5xx).
         transport: The board's HTTPS and MQTT clients.
         store: Where the credential persists.
         capabilities: What the device can do or report, at least one declaration, e.g.
@@ -576,6 +668,7 @@ def connect(  # noqa: PLR0913 -- the hero API takes every option by keyword
     manifest = build_manifest(capabilities)
     clock = time.time if now is None else now
     stored = store.load()
+    claimed = False
     if stored is not None:
         credential = Credential.from_dict(stored)
     elif claim_code:
@@ -583,6 +676,7 @@ def connect(  # noqa: PLR0913 -- the hero API takes every option by keyword
             transport, provisioning_url, claim_code, clock(), name=name, virtual=virtual
         )
         store.save(credential.to_dict())
+        claimed = True
     else:
         raise CredentialError("no stored credential and no claim code provided")
 
@@ -602,14 +696,17 @@ def connect(  # noqa: PLR0913 -- the hero API takes every option by keyword
         session = _open_session(transport, broker, credential, keepalive_s)
     except GatewayUnavailableError as err:
         # How a gateway redirects an MQTT 3.1.1 client: renewal names where the device belongs.
-        moved = _renew_for_moved_gateway(
-            credential, transport, crypto, provisioning_url, clock(), broker
+        renewed = _renew_for_moved_gateway(
+            credential, transport, crypto, store, provisioning_url, clock(), claimed=claimed
         )
-        if moved is None or moved.broker is None:
+        if (
+            not isinstance(renewed, Credential)
+            or renewed.broker is None
+            or renewed.broker == broker
+        ):
             raise _gateway_error(broker, err) from err
-        store.save(moved.to_dict())
-        credential = moved
-        broker = moved.broker
+        credential = renewed
+        broker = renewed.broker
         renew_error = None
         try:
             session = _open_session(transport, broker, credential, keepalive_s)
