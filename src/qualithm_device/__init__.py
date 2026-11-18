@@ -6,8 +6,8 @@ supplies.
 """
 
 from qualithm_device._backoff import RECONNECT_CAP_MS, RECONNECT_FLOOR_MS, reconnect_delay
-from qualithm_device._credential import Broker, Credential, parse_broker
-from qualithm_device._device import Device, connect, renew_due, resolve_broker
+from qualithm_device._credential import Broker, Credential, parse_api_url, parse_broker
+from qualithm_device._device import Device, connect, renew_due, resolve_api_url, resolve_broker
 from qualithm_device._errors import (
     CapabilityError,
     ClaimError,
@@ -66,12 +66,14 @@ __all__ = [
     "enroll_certificate",
     "format_iso",
     "is_valid_capability_key",
+    "parse_api_url",
     "parse_broker",
     "parse_iso",
     "reconnect_delay",
     "renew",
     "renew_due",
     "renew_proof",
+    "resolve_api_url",
     "resolve_broker",
     "telemetry_payload",
 ]
