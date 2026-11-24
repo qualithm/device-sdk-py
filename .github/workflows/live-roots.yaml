@@ -1,0 +1,96 @@
+name: Live Roots
+
+# Devices trust only the roots in src/qualithm_device/_roots.py. This fails, and files an issue,
+# when a live API or gateway chain stops ending at one of them.
+on:
+  schedule:
+    - cron: "30 5 * * *" # Daily at 05:30 UTC
+  pull_request:
+    branches: [development, main]
+    paths:
+      - "src/qualithm_device/_roots.py"
+      - "scripts/check_live_roots.py"
+      - ".github/workflows/live-roots.yaml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Every host a device reaches over TLS: the global and zone APIs, and each zone's gateway. A
+# gateway whose cluster is down has no DNS record and is skipped.
+env:
+  TARGETS: >-
+    api.qualithm.com:443
+    api.sg-sin-a.qualithm.com:443
+    api.us-nyc-a.qualithm.com:443
+    api.de-fra-a.qualithm.com:443
+    api.test.qualithm.com:443
+    api.test-sg-sin-a.qualithm.com:443
+    api.test-de-fra-a.qualithm.com:443
+    gw.sg-sin-a.qualithm.com:8883
+    gw.us-nyc-a.qualithm.com:8883
+    gw.de-fra-a.qualithm.com:8883
+    gw.test-sg-sin-a.qualithm.com:8883
+    gw.test-de-fra-a.qualithm.com:8883
+
+jobs:
+  check:
+    name: Live chains end at a pinned root
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Check each host's chain against the pinned roots
+        id: scan
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          # shellcheck disable=SC2086 # TARGETS is a space-separated list
+          python3 scripts/check_live_roots.py $TARGETS | tee "$RUNNER_TEMP/report.txt"
+      - name: Build the issue body
+        id: body
+        if: always()
+        run: |
+          {
+            echo 'body<<BODYEOF'
+            echo 'A live certificate chain no longer ends at a root the device SDK pins, so devices'
+            echo 'on a frozen image fail to provision, renew or connect to it.'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/report.txt" 2>/dev/null || true
+            echo '```'
+            echo 'BODYEOF'
+          } >> "$GITHUB_OUTPUT"
+      - name: Create app token for pm issue filing
+        if: github.event_name != 'pull_request'
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.PROJECTS_GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.PROJECTS_GH_APP_PRIVATE_KEY }}
+          owner: qualithm
+      - name: Report failure
+        if: github.event_name != 'pull_request' && steps.scan.outcome == 'failure'
+        uses: ./.github/actions/report-scan-failure
+        with:
+          mode: report
+          title: "${{ github.event.repository.name }}: a live certificate chain no longer ends at a pinned root"
+          label: off-board
+          body: ${{ steps.body.outputs.body }}
+          github-token: ${{ steps.app-token.outputs.token }}
+      - name: Resolve stale failure issue
+        if: github.event_name != 'pull_request' && steps.scan.outcome == 'success'
+        uses: ./.github/actions/report-scan-failure
+        with:
+          mode: resolve
+          title: "${{ github.event.repository.name }}: a live certificate chain no longer ends at a pinned root"
+          github-token: ${{ steps.app-token.outputs.token }}
+      - name: Fail job if the check failed
+        if: steps.scan.outcome == 'failure'
+        run: exit 1
