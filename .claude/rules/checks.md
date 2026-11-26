@@ -10,6 +10,7 @@ This repo's `ci.yaml` is generated from `dx/ci-templates/python-lib-micropython.
 first try:
 
 ```bash
+bash .claude/checks/images.sh
 uv run --locked ruff check            # `uv run --locked ruff check --fix` fixes what it can
 uv run --locked ruff format --check   # `uv run --locked ruff format` rewrites the files
 uv run --no-project --with pyyaml env -u VIRTUAL_ENV python .claude/checks/ci-jobs.py --skip-ci-only lint typecheck coverage micropython
@@ -23,7 +24,7 @@ The `ci-jobs.py` step runs CI's jobs locally, as CI writes them:
 - **Lint** — ruff, then `package.json` against `src/` and its version, then the imports of every
   module the manifest ships against what a board has.
 - **Type Check** — the board stubs against the MicroPython pin, then pyright.
-- **Coverage** — the tests on CPython, with the same 80% line gate, minus the Codecov upload.
+- **Coverage** — the tests on CPython, with the same 80% line gate, minus Codecov.
 - **Test (MicroPython Unix port)** — builds the pinned Unix port and `mpy-cross` once per machine
   into `~/.cache/qualithm/`, checks both match the pin, runs `tests/` on the Unix port and compiles
   every shipped module.
